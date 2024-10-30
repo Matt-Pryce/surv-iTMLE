@@ -42,10 +42,10 @@ nuis_mod_surv <- function(model,
                           method = c("Parametric","Random forest","Super learner"),
                           covariates,
                           pred_data,
-                          pred_data_long,
                           pred_data_long_all,
-                          evt_times_uni
-                          #SL_lib,
+                          evt_times_uni,
+                          SL_lib,
+                          learner = NA
 ){
   
   #------------------------------#
@@ -55,20 +55,32 @@ nuis_mod_surv <- function(model,
   tryCatch(
     {
       if (model == "Outcome"){
+
         train_data0 <- subset(data,data$A==0)
-        train_data0 <- subset(train_data0,select = c("time","Y",covariates))
         train_data1 <- subset(data,data$A==1)
-        train_data1 <- subset(train_data1,select = c("time","Y",covariates))
+        train_data0 <- subset(train_data0,select = c("ID","time","Y",covariates))
+        train_data1 <- subset(train_data1,select = c("ID","time","Y",covariates))
+        
+        covs_train0 <- train_data0[,covariates]
+        covs_train1 <- train_data1[,covariates]
+        
+        pred_data_long_all <- pred_data_long_all %>%
+          arrange(ID, tstart) %>%
+          group_by(ID)
+        
+        covs_test <- pred_data_long_all[,covariates]
       } 
       else if (model == "Propensity score"){
         train_data <- as.data.frame(subset(data,select = c(covariates,"A","s")))
       }
       else if (model == "Censoring"){
-        train_data <- as.data.frame(subset(data,select = c("time","C",covariates,"A","s")))
+        train_data <- as.data.frame(subset(data,select = c("time","C",covariates,"A")))
+        covs_train <- train_data[,covariates]
+        covs_test <- pred_data_long_all[,covariates]
       }
-      # else if (model == "Pseudo outcome"){
-      #   train_data <- data
-      # }
+      else if (model == "Pseudo outcome - Pooled logistic"){
+        train_data <- as.data.frame(subset(data,select = c("pse_Y","time",covariates)))
+      }
     },
     error=function(e) {
       stop('An error occured when creating analysis data')
@@ -79,7 +91,7 @@ nuis_mod_surv <- function(model,
   #----------------------#
   #--- Running models ---#
   #----------------------#
-  
+
   if (model == "Outcome"){
     tryCatch(
       {
@@ -88,27 +100,30 @@ nuis_mod_surv <- function(model,
           mod_0 <- coxph(Surv(time, Y) ~ ., data = train_data0)
           mod_1 <- coxph(Surv(time, Y) ~ ., data = train_data1)
         }
-        # if (method == "Random forest"){
-        #   X_S_0 <- as.matrix(subset(train_data0, select = covariates))
-        #   mod_0 <- regression_forest(X_S_0, train_data0$Y, honesty = FALSE,tune.parameters = "all")
+        # if (method == "Cox lasso"){
         #
-        #   X_S_1 <- as.matrix(subset(train_data1, select = covariates))
-        #   mod_1 <- regression_forest(X_S_1, train_data1$Y, honesty = FALSE,tune.parameters = "all")
+        #   #Defining survival objects
+        #   y0 <- Surv(time = train_data0$time, event = train_data0$Y)
+        #   y1 <- Surv(time = train_data1$time, event = train_data1$Y)
+        #
+        #   #Define x a vectors of covariates
+        #   x0 <- as.matrix(subset(train_data0,select=covariates))
+        #   x1 <- as.matrix(subset(train_data1,select=covariates))
+        #
+        #   mod_0 <- cv.glmnet(x0, y0, family = "cox")
+        #   mod_1 <- cv.glmnet(x1, y1, family = "cox")
         # }
-        # else
-        # else if (method == "Super learner"){
-        #   if (Y_bin == 1){
-        #     mod_0 <- SuperLearner(Y = train_data0$Y, X = data.frame(subset(train_data0, select = covariates)),
-        #                           method = "method.NNLS",
-        #                           family = binomial(),
-        #                           cvControl = list(V = 10, stratifyCV=TRUE),
-        #                           SL.library = SL_lib)
-        #     mod_1 <- SuperLearner(Y = train_data1$Y, X = data.frame(subset(train_data1, select = covariates)),
-        #                           method = "method.NNLS",
-        #                           family = binomial(),
-        #                           cvControl = list(V = 10, stratifyCV=TRUE),
-        #                           SL.library = SL_lib)
-        #   }
+        if (method == "Super learner"){
+          # set.seed(1)  may need to set seed
+          mod_0 <- survSuperLearner(time = train_data0$time, event = train_data0$Y, X = covs_train0, new.times = 10,
+                                   event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+                                   cvControl=list(V = 5),
+                                   control=list(saveFitLibrary = TRUE))
+          mod_1 <- survSuperLearner(time = train_data1$time, event = train_data1$Y, X = covs_train1, new.times = 10,
+                                    event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+                                    cvControl=list(V = 5),
+                                    control=list(saveFitLibrary = TRUE))
+        }
       },
       error=function(e) {
         stop('An error occured when running outcome models')
@@ -116,7 +131,7 @@ nuis_mod_surv <- function(model,
       }
     )
   }
-  
+
   if (model == "Censoring"){
     tryCatch(
       {
@@ -124,27 +139,12 @@ nuis_mod_surv <- function(model,
           #Running first outcome models
           mod <- coxph(Surv(time, C) ~ ., data = train_data)
         }
-        # if (method == "Random forest"){
-        #   X_S_0 <- as.matrix(subset(train_data0, select = covariates))
-        #   mod_0 <- regression_forest(X_S_0, train_data0$Y, honesty = FALSE,tune.parameters = "all")
-        #
-        #   X_S_1 <- as.matrix(subset(train_data1, select = covariates))
-        #   mod_1 <- regression_forest(X_S_1, train_data1$Y, honesty = FALSE,tune.parameters = "all")
-        # }
-        # else
-        # else if (method == "Super learner"){
-        #   if (Y_bin == 1){
-        #     mod_0 <- SuperLearner(Y = train_data0$Y, X = data.frame(subset(train_data0, select = covariates)),
-        #                           method = "method.NNLS",
-        #                           family = binomial(),
-        #                           cvControl = list(V = 10, stratifyCV=TRUE),
-        #                           SL.library = SL_lib)
-        #     mod_1 <- SuperLearner(Y = train_data1$Y, X = data.frame(subset(train_data1, select = covariates)),
-        #                           method = "method.NNLS",
-        #                           family = binomial(),
-        #                           cvControl = list(V = 10, stratifyCV=TRUE),
-        #                           SL.library = SL_lib)
-        #   }
+        else if (method == "Super learner"){
+          mod <- survSuperLearner(time = train_data$time, event = train_data$C, X = covs_train, new.times = 10,
+                                    event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+                                    cvControl=list(V = 5),
+                                    control=list(saveFitLibrary = TRUE))
+        }
       },
       error=function(e) {
         stop('An error occured when running censoring model')
@@ -152,49 +152,43 @@ nuis_mod_surv <- function(model,
       }
     )
   }
-  
-  if (model == "Propensity score"){  # | model == "Censoring" | model == "Pseudo outcome" | model == "IPCW"){
+
+  if (model == "Propensity score"){
     if (method == "Random forest"){
-      if (model == "Propensity score"){
-        X <- as.matrix(subset(train_data, select = covariates))
+      X <- as.matrix(subset(train_data, select = covariates))
         mod <- regression_forest(X, train_data$A, honesty = FALSE,tune.parameters = "all")
-      }
-      # else if (model == "Pseudo outcome"){
-      #   X <- as.matrix(subset(train_data, select = covariates))
-      #   mod <- regression_forest(X, train_data$pse_Y)
-      # }
     }
     else if (method == "Parametric"){
-      if (model== "Propensity score"){
-        fit_data <- subset(train_data,select = -c(s))
-        mod <- glm(A ~ . , data = fit_data, family = binomial())
-      }
-      # else if (model == "Pseudo outcome"){
-      #   fit_data <- subset(train_data,select = c("pse_Y",covariates))
-      #   mod <- lm(pse_Y ~ . , data = fit_data)
-      # }
+      fit_data <- subset(train_data,select = -c(s))
+      mod <- glm(A ~ . , data = fit_data, family = binomial())
     }
     else if (method == "Super learner"){
-      if (model == "Propensity score"){
-        sums <- table(train_data$A)
-        cv_folds <- min(10,sums[1],sums[2])
-        mod <- SuperLearner(Y = train_data$A, X = data.frame(subset(train_data, select = covariates)),
-                            method = "method.NNLS",
-                            family = binomial(),
-                            cvControl = list(V = cv_folds, stratifyCV=TRUE),
-                            SL.library = SL_lib)
-      }
-      # else if (model == "Pseudo outcome"){
-      #   mod <- SuperLearner(Y = train_data$pse_Y, X = data.frame(subset(train_data, select = covariates)),
-      #                       method = "method.NNLS",
-      #                       family = gaussian(),
-      #                       cvControl = list(V = 10, stratifyCV=FALSE),
-      #                       SL.library = SL_lib)
-      # }
+      sums <- table(train_data$A)
+      cv_folds <- min(10,sums[1],sums[2])
+      mod <- SuperLearner(Y = train_data$A, X = data.frame(subset(train_data, select = covariates)),
+                          method = "method.NNLS",
+                          family = binomial(),
+                          cvControl = list(V = cv_folds, stratifyCV=TRUE),
+                          SL.library = SL_lib)
     }
   }
-  
-  
+
+  if (model == "Pseudo outcome - Pooled logistic"){
+    if (method == "Random forest"){
+      X <- as.matrix(subset(train_data, select = c(covariates,"time")))
+      mod <- regression_forest(X, train_data$pse_Y)
+    }
+    else if (method == "Parametric"){
+      mod <- lm(pse_Y ~ . , data = train_data)
+    }
+    else if (method == "Super learner"){
+      mod <- SuperLearner(Y = train_data$pse_Y, X = data.frame(subset(train_data, select = c(covariates,"time"))),
+                          method = "method.NNLS",
+                          family = gaussian(),
+                          cvControl = list(V = 10, stratifyCV=FALSE),
+                          SL.library = SL_lib)
+    }
+  }
 
 
   #-----------------------------------#
@@ -210,68 +204,228 @@ nuis_mod_surv <- function(model,
           S_k_pred_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="survival")
           S_k_pred_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="survival")
 
-          #Hazard estimates at the time point (All time point data)
-          pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
-          pred_data_long_all <- pred_data_long_all %>%
-            arrange(ID, tstart) %>%
-            group_by(ID) %>%
-            mutate(h_k_long_all_0 = c(0,diff(H_k_long_all_0)))
+          if (learner == "survEP-learner" | learner == "M-learner"){
+            #Hazard estimates at the time point (All time point data)
+            pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, tstart) %>%
+              group_by(ID) %>%
+              mutate(h_k_long_all_0 = c(H_k_long_all_0[1], diff(H_k_long_all_0)))
 
-          H_k_pred_long_all_0 <- pred_data_long_all$H_k_long_all_0
-          h_k_pred_long_all_0 <- pred_data_long_all$h_k_long_all_0
+            H_k_pred_long_all_0 <- pred_data_long_all$H_k_long_all_0
+            h_k_pred_long_all_0 <- pred_data_long_all$h_k_long_all_0
 
-          pred_data_long_all$H_k_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="expected")
-          pred_data_long_all <- pred_data_long_all %>%
-            arrange(ID, tstart) %>%
-            group_by(ID) %>%
-            mutate(h_k_long_all_1 = c(0,diff(H_k_long_all_1)))
+            pred_data_long_all$H_k_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="expected")
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, tstart) %>%
+              group_by(ID) %>%
+              mutate(h_k_long_all_1 = c(H_k_long_all_1[1], diff(H_k_long_all_1)))
 
-          H_k_pred_long_all_1 <- pred_data_long_all$H_k_long_all_1
-          h_k_pred_long_all_1 <- pred_data_long_all$h_k_long_all_1
+            H_k_pred_long_all_1 <- pred_data_long_all$H_k_long_all_1
+            h_k_pred_long_all_1 <- pred_data_long_all$h_k_long_all_1
 
 
-          #Survival predictions for time point of interest
-          temp_data_list <- vector("list", length(evt_times_uni))  #2)
-          for (t in seq_along(evt_times_uni)){  #[2]
-            temp_data <- pred_data_long_all
-            temp_data$time2 <- temp_data$time      #Need time to be set to a number but don't want to lose original value
-            temp_data$time <- evt_times_uni[t]
+            #Survival predictions for time point of interest
+            temp_data_list <- vector("list", length(evt_times_uni))
+            for (t in seq_along(evt_times_uni)){
+              temp_data <- pred_data_long_all
+              temp_data$time2 <- temp_data$time      #Need time to be set to a number but don't want to lose original value
+              temp_data$time <- evt_times_uni[t]
 
-            temp_data_list[[t]] <- temp_data
-          }
+              temp_data_list[[t]] <- temp_data
+            }
 
-          # S_t_pred_long_all_0_list <- vector("list", 2)
-          # S_t_pred_long_all_1_list <- vector("list", 2)
-          # S_t_pred_long_all_0_list[[2]] <- predict(mod_0,newdata=temp_data_list[[2]],type="survival")
-          # S_t_pred_long_all_1_list[[2]] <- predict(mod_1,newdata=temp_data_list[[2]],type="survival")
-          # #UNCOMMENT AND REINSTATE WHEN MAKING PREDICTIONS FOR ALL TIME POINTS
-          S_t_pred_long_all_0_list <- lapply(temp_data_list, function(x){predict(mod_0,newdata=x,type="survival")})
-          S_t_pred_long_all_1_list <- lapply(temp_data_list, function(x){predict(mod_1,newdata=x,type="survival")})
+            S_t_pred_long_all_0_list <- lapply(temp_data_list, function(x){predict(mod_0,newdata=x,type="survival")})
+            S_t_pred_long_all_1_list <- lapply(temp_data_list, function(x){predict(mod_1,newdata=x,type="survival")})
 
-          for (t in seq_along(evt_times_uni)){
-            temp_data <- temp_data_list[[t]]
-            temp_data$S_t_pred_long_all_0 <- S_t_pred_long_all_0_list[[t]]
-            temp_data$S_t_pred_long_all_1 <- S_t_pred_long_all_1_list[[t]]
-            temp_data$time <- temp_data$time2       #Reassigning original value
+            for (t in seq_along(evt_times_uni)){
+              temp_data <- temp_data_list[[t]]
+              temp_data$S_t_pred_long_all_0 <- S_t_pred_long_all_0_list[[t]]
+              temp_data$S_t_pred_long_all_1 <- S_t_pred_long_all_1_list[[t]]
+              temp_data$time <- temp_data$time2       #Reassigning original value
 
-            temp_data <- temp_data %>% mutate(S_t_pred_long_all_a = case_when(
-              A == 1 ~ S_t_pred_long_all_1,
-              A == 0 ~ S_t_pred_long_all_0
-            ))
+              temp_data <- temp_data %>% mutate(S_t_pred_long_all_a = case_when(
+                A == 1 ~ S_t_pred_long_all_1,
+                A == 0 ~ S_t_pred_long_all_0
+              ))
 
-            temp_data_list[[t]] <- temp_data
+              temp_data_list[[t]] <- temp_data
+            }
           }
         }
-        # if (method == "Random forest"){
-        #   mod_pred_0 <- predict(mod_0, as.matrix(subset(pred_data,select=c(covariates))))$pred
-        #   mod_pred_1 <- predict(mod_1, as.matrix(subset(pred_data,select=c(covariates))))$pred
+        # if (method == "Cox lasso"){
+        #   pred_matrix <- as.matrix(subset(pred_data_long_all,select=covariates))
+        #
+        #
+        #   pred_data_long_all2 <- pred_data_long_all
+        #
+        #   #Survival estimates at the time point (Training and all data points)
+        #   S_k_pred_long_all_0 <- survival::survfit(mod_0,s=mod_0$lambda.min, x = x0, y = y0,newx = pred_matrix)
+        #   S_k_pred_long_all_1 <- survival::survfit(mod_1,s=mod_1$lambda.min, x = x1, y = y1,newx = pred_matrix)
+        #
+        #   # if (learner == "survEP-learner" | learner == "M-learner"){
+        #   #   #Hazard estimates at the time point (All time point data)
+        #   #   pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
+        #   #   pred_data_long_all <- pred_data_long_all %>%
+        #   #     arrange(ID, tstart) %>%
+        #   #     group_by(ID) %>%
+        #   #     mutate(h_k_long_all_0 = c(0,diff(H_k_long_all_0)))
+        #   #
+        #   #   H_k_pred_long_all_0 <- pred_data_long_all$H_k_long_all_0
+        #   #   h_k_pred_long_all_0 <- pred_data_long_all$h_k_long_all_0
+        #   #
+        #   #   pred_data_long_all$H_k_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="expected")
+        #   #   pred_data_long_all <- pred_data_long_all %>%
+        #   #     arrange(ID, tstart) %>%
+        #   #     group_by(ID) %>%
+        #   #     mutate(h_k_long_all_1 = c(0,diff(H_k_long_all_1)))
+        #   #
+        #   #   H_k_pred_long_all_1 <- pred_data_long_all$H_k_long_all_1
+        #   #   h_k_pred_long_all_1 <- pred_data_long_all$h_k_long_all_1
+        #   #
+        #   #
+        #   #   #Survival predictions for time point of interest
+        #   #   temp_data_list <- vector("list", length(evt_times_uni))
+        #   #   for (t in seq_along(evt_times_uni)){
+        #   #     temp_data <- pred_data_long_all
+        #   #     temp_data$time2 <- temp_data$time      #Need time to be set to a number but don't want to lose original value
+        #   #     temp_data$time <- evt_times_uni[t]
+        #   #
+        #   #     temp_data_list[[t]] <- temp_data
+        #   #   }
+        #   #
+        #   #   S_t_pred_long_all_0_list <- lapply(temp_data_list, function(x){predict(mod_0,newdata=x,type="survival")})
+        #   #   S_t_pred_long_all_1_list <- lapply(temp_data_list, function(x){predict(mod_1,newdata=x,type="survival")})
+        #   #
+        #   #   for (t in seq_along(evt_times_uni)){
+        #   #     temp_data <- temp_data_list[[t]]
+        #   #     temp_data$S_t_pred_long_all_0 <- S_t_pred_long_all_0_list[[t]]
+        #   #     temp_data$S_t_pred_long_all_1 <- S_t_pred_long_all_1_list[[t]]
+        #   #     temp_data$time <- temp_data$time2       #Reassigning original value
+        #   #
+        #   #     temp_data <- temp_data %>% mutate(S_t_pred_long_all_a = case_when(
+        #   #       A == 1 ~ S_t_pred_long_all_1,
+        #   #       A == 0 ~ S_t_pred_long_all_0
+        #   #     ))
+        #   #
+        #   #     temp_data_list[[t]] <- temp_data
+        #   #   }
+        #   # }
         # }
-        # else
-        # else if (method == "Super learner"){
-        #   pred_data <- subset(pred_data,select = c(covariates))
-        #   mod_pred_0 <- predict(mod_0, pred_data)$pred
-        #   mod_pred_1 <- predict(mod_1, pred_data)$pred
-        # }
+        if (method == "Super learner"){
+          #Number of blocks
+          num_blocks <- ceiling(dim(pred_data_long_all)[1]/10000)
+
+          #Give observations numbers by 10,000
+          number_list <- rep(1:num_blocks, each = 10000)
+          pred_data_long_all$iter <- number_list[1:dim(pred_data_long_all)[1]]
+
+          #Loop over the amount of 10000s
+          temp_data_list_all <- replicate(length(evt_times_uni), replicate(num_blocks, list(), simplify = FALSE), simplify = FALSE)   #Make matrix
+          for (i in 1:num_blocks){
+            #Creating subset
+            pred_data_long_all_temp <- subset(pred_data_long_all,pred_data_long_all$iter == i)
+
+            #Creating pred data
+            covs_test <- pred_data_long_all_temp[,covariates]
+
+            #Creating survival predication
+            S_k_pred_long_all_0 <- as.data.frame(predict.survSuperLearner(mod_0, newdata = covs_test, new.times=evt_times_uni)$event.SL.predict)
+            S_k_pred_long_all_1 <- as.data.frame(predict.survSuperLearner(mod_1, newdata = covs_test, new.times=evt_times_uni)$event.SL.predict)
+
+            #Rename columns of this matrix
+            names(S_k_pred_long_all_0)[seq_along(evt_times_uni)] <- paste("S0_", evt_times_uni,sep="")
+            names(S_k_pred_long_all_1)[seq_along(evt_times_uni)] <- paste("S1_", evt_times_uni,sep="")
+
+            #Merging with long data
+            pred_data_long_all_temp <- cbind(pred_data_long_all_temp,S_k_pred_long_all_0)
+            pred_data_long_all_temp <- cbind(pred_data_long_all_temp,S_k_pred_long_all_1)
+
+            if (learner == "T-learner"){
+              #Defining S_k predictions for the dataset
+              pred_data_long_all_temp$time_seq <- match(pred_data_long_all_temp$time, evt_times_uni)
+              col_index_offset <- 6 + length(covariates)
+              pred_data_long_all_temp$S_k_pred_0 <- apply(pred_data_long_all_temp, 1, function(row) {
+                row[col_index_offset + row['time_seq']]
+              })
+
+              col_index_offset <- 6 + length(covariates) + length(evt_times_uni)
+              pred_data_long_all_temp$S_k_pred_1 <- apply(pred_data_long_all_temp, 1, function(row) {
+                row[col_index_offset + row['time_seq']]
+              })
+            }
+            if (learner == "survEP-learner" | learner == "M-learner"){
+              #Defining S_k predictions for the dataset
+              pred_data_long_all_temp$time_seq <- match(pred_data_long_all_temp$time, evt_times_uni)
+              col_index_offset <- 9 + length(covariates)
+              pred_data_long_all_temp$S_k_pred_0 <- apply(pred_data_long_all_temp, 1, function(row) {
+                row[col_index_offset + row['time_seq']]
+              })
+
+              col_index_offset <- 9 + length(covariates) + length(evt_times_uni)
+              pred_data_long_all_temp$S_k_pred_1 <- apply(pred_data_long_all_temp, 1, function(row) {
+                row[col_index_offset + row['time_seq']]
+              })
+
+              #Calculating cumulative hazard estimates
+              pred_data_long_all_temp$H_k_pred_0 <- -log(pred_data_long_all_temp$S_k_pred_0)
+              pred_data_long_all_temp$H_k_pred_1 <- -log(pred_data_long_all_temp$S_k_pred_1)
+
+              #Calculating hazards at each time
+              pred_data_long_all_temp <- pred_data_long_all_temp %>%
+                arrange(ID, tstart) %>%
+                group_by(ID) %>%
+                mutate(h_k_pred_0 = c(H_k_pred_0[1], diff(H_k_pred_0)))
+              pred_data_long_all_temp <- pred_data_long_all_temp %>%
+                arrange(ID, tstart) %>%
+                group_by(ID) %>%
+                mutate(h_k_pred_1 = c(H_k_pred_1[1], diff(H_k_pred_1)))
+
+              #Survival predictions for time point of interest
+              for (t in seq_along(evt_times_uni)){
+                temp_data <- pred_data_long_all_temp
+                temp_data$S_t_pred_long_all_0 <- temp_data[[9 + length(covariates) + t]]
+                temp_data$S_t_pred_long_all_1 <- temp_data[[9 + length(covariates) + length(evt_times_uni) + t]]
+
+                temp_data <- temp_data %>% mutate(S_t_pred_long_all_a = case_when(
+                  A == 1 ~ S_t_pred_long_all_1,
+                  A == 0 ~ S_t_pred_long_all_0
+                ))
+
+                keep_covs_temp <- append(c("ID","Y","A","C","tstart","time","s",
+                                           "S_k_pred_0","S_k_pred_1","H_k_pred_0","H_k_pred_1","h_k_pred_0","h_k_pred_1","at_risk",
+                                           "S_t_pred_long_all_0","S_t_pred_long_all_1","S_t_pred_long_all_a"),covariates)
+                temp_data <- subset(temp_data,select = keep_covs_temp)
+
+                #Allocate to correct bit of matrix
+                temp_data_list_all[[t]][[i]] <- temp_data
+              }
+            }
+            if (i == 1){
+              pred_data_long_all_final <- pred_data_long_all_temp
+            }
+            else {
+              pred_data_long_all_final <- rbind(pred_data_long_all_final,pred_data_long_all_temp)
+            }
+          }
+          #Loop over things to create full datasets
+          temp_data_list <- vector("list", length(evt_times_uni))
+          for (tp in 1:length(evt_times_uni)){
+            temp_data_list[[tp]] <- do.call(rbind, temp_data_list_all[[tp]])
+          }
+
+          pred_data_long_all <- pred_data_long_all_final
+
+          if (learner == "survEP-learner" | learner == "M-learner"){
+          keep_covs <- append(c("ID","Y","A","C","tstart","time","s",
+                                "S_k_pred_0","S_k_pred_1","H_k_pred_0","H_k_pred_1","h_k_pred_0","h_k_pred_1","at_risk"),covariates)
+          }
+          else if (learner == "T-learner"){
+            keep_covs <- append(c("ID","Y","tstart","time",
+                                  "S_k_pred_0","S_k_pred_1"),covariates)
+          }
+          pred_data_long_all <- subset(pred_data_long_all,select = keep_covs)
+        }
       },
       #if an error occurs, tell me the error
       error=function(e) {
@@ -289,6 +443,69 @@ nuis_mod_surv <- function(model,
           #Censoring estimates (Training and all data points)
           G_k_pred_long_all <- predict(mod,newdata=pred_data_long_all,type="survival")
         }
+        if (method == "Super learner"){
+          if (dim(pred_data_long_all)[1] <= 10000){
+            #Survival estimates at the time point (Training and all data points)
+            G_k_pred_long_all <- as.data.frame(predict.survSuperLearner(mod, newdata = covs_test, new.times=evt_times_uni)$event.SL.predict)
+
+            #Rename columns of this matrix
+            names(G_k_pred_long_all)[seq_along(evt_times_uni)] <- paste("G_", evt_times_uni,sep="")
+
+            #Merging with long data
+            pred_data_long_all <- cbind(pred_data_long_all,G_k_pred_long_all)
+
+            #Defining S_k predictions for the dataset
+            pred_data_long_all$time_seq <- match(pred_data_long_all$time, evt_times_uni)
+            col_index_offset <- 6 + length(covariates)
+            pred_data_long_all$G_k_pred <- apply(pred_data_long_all, 1, function(row) {
+              row[col_index_offset + row['time_seq']]
+            })
+          }
+          else{
+            #Number of blocks
+            num_blocks <- ceiling(dim(pred_data_long_all)[1]/10000)
+
+            #Give observations numbers by 10,000
+            number_list <- rep(1:num_blocks, each = 10000)
+            pred_data_long_all$iter <- number_list[1:dim(pred_data_long_all)[1]]
+
+            #Loop over the amount of 10000s
+            for (i in 1:num_blocks){
+              #Creating subset
+              pred_data_long_all_temp <- subset(pred_data_long_all,pred_data_long_all$iter == i)
+
+              #Creating pred data
+              covs_test <- pred_data_long_all_temp[,covariates]
+
+              #Creating survival predication
+              G_k_pred_long_all <- as.data.frame(predict.survSuperLearner(mod, newdata = covs_test, new.times=evt_times_uni)$event.SL.predict)
+
+              #Rename columns of this matrix
+              names(G_k_pred_long_all)[seq_along(evt_times_uni)] <- paste("G_", evt_times_uni,sep="")
+
+              #Merging with long data
+              pred_data_long_all_temp <- cbind(pred_data_long_all_temp,G_k_pred_long_all)
+
+              #Defining S_k predictions for the dataset
+              pred_data_long_all_temp$time_seq <- match(pred_data_long_all_temp$time, evt_times_uni)
+              col_index_offset <- 7 + length(covariates)
+              pred_data_long_all_temp$G_k_pred <- apply(pred_data_long_all_temp, 1, function(row) {
+                row[col_index_offset + row['time_seq']]
+              })
+
+              keep_covs <- c("ID","A","C","tstart","time","s",covariates,"G_k_pred")
+              pred_data_long_all_temp <- subset(pred_data_long_all_temp,select = keep_covs)
+
+              if (i == 1){
+                pred_data_long_all_final <- pred_data_long_all_temp
+              }
+              else {
+                pred_data_long_all_final <- rbind(pred_data_long_all_final,pred_data_long_all_temp)
+              }
+            }
+            pred_data_long_all <- pred_data_long_all_final
+          }
+        }
       },
       #if an error occurs, tell me the error
       error=function(e) {
@@ -297,8 +514,8 @@ nuis_mod_surv <- function(model,
       }
     )
   }
-  
-  if (model == "Propensity score"){   # | model == "Censoring"){
+
+  if (model == "Propensity score"){
     if (method == "Random forest"){
       pred <- predict(mod, pred_data)$predictions
     }
@@ -306,24 +523,49 @@ nuis_mod_surv <- function(model,
       pred <- predict(mod, as.data.frame(pred_data), type = "response")
     }
     else if (method == "Super learner"){
-      pred <- predict(mod, as.data.frame(pred_data))$pred
+      pred <- as.vector(predict(mod, as.data.frame(pred_data))$pred)
     }
   }
 
-  # if (model == "Pseudo outcome"){
-  #   if (method == "Random forest"){
-  #     pred_data_matrix <- as.matrix(subset(pred_data, select = c(covariates)))
-  #     pred <- predict(mod, pred_data_matrix)
-  #   }
-  #   else if (method == "Parametric"){
-  #     pred_data <- subset(pred_data, select = c(covariates))
-  #     pred <- as.data.frame(predict(mod, pred_data, type = "response"))
-  #   }
-  #   else if (method == "Super learner"){
-  #     pred_data <- subset(pred_data, select = c(covariates))
-  #     pred <- predict(mod, pred_data)$pred
-  #   }
-  # }
+  if (model == "Pseudo outcome - Pooled logistic"){
+    pred_data_long_all <- pred_data_long_all[order(pred_data_long_all$ID,pred_data_long_all$time),]
+    pred_data <- subset(pred_data_long_all, select = c(covariates,"time"))
+    if (method == "Parametric"){
+      #Obtaining conditional predictions
+      pred_data_long_all$pred_cond <- predict(mod, pred_data, type = "response")
+    }
+    else if (method == "Random forest"){
+      pred_data_matrix <- as.matrix(pred_data)
+      pred_data_long_all$pred_cond <- predict(mod, pred_data_matrix)$predictions
+    }
+    else if (method == "Super learner"){
+      pred_data_long_all$pred_cond <- predict(mod, pred_data)$pred
+    }
+
+    #--- Creating Cumulative predictions ---#
+    #Need to number time points
+    tps <- unique(pred_data_long_all$time)
+    num_tps <- length(tps)
+
+    #Re-numbering time point
+    tps2_list <- 0:(num_tps - 1)
+    pred_data_long_all$time2 <- 0
+    for (i in 0:(num_tps-1)){
+      for (j in 1:length(pred_data_long_all$ID)){
+        if (pred_data_long_all$time[j] == tps[i+1]){
+          pred_data_long_all$time2[j] <- tps2_list[i+1]
+        }
+      }
+    }
+    pred_data_long_all$time_ordered <- pred_data_long_all$time2 + 1
+
+    pred_data_long_all$pred <- pred_data_long_all$pred_cond
+    for (k in 1:length(pred_data_long_all$ID)){
+      if (pred_data_long_all$time_ordered[k] > 1){
+        pred_data_long_all$pred[k] <- pred_data_long_all$pred[k-1]+pred_data_long_all$pred_cond[k]
+      }
+    }
+  }
 
 
 
@@ -331,10 +573,13 @@ nuis_mod_surv <- function(model,
   #--- Returning information ---#
   #-----------------------------#
 
-  if (model == "Imputation" | model == "IPCW"){
-    output <- analysis_data
+  if (model == "Outcome" & method == "Super learner"  & (learner == "survEP-learner" | learner == "M-learner")){
+      output <- list(out_mod_0 = mod_0,
+                     out_mod_1 = mod_1,
+                     pred_data_long_all_pred = pred_data_long_all,
+                     Surv_t_pred_long_all_list=temp_data_list)
   }
-  else if (model == "Outcome"){
+  else if (model == "Outcome" & method != "Super learner"  & (learner == "survEP-learner" | learner == "M-learner")){
     output <- list(S_k_pred_long_all_0 = S_k_pred_long_all_0,
                    S_k_pred_long_all_1 = S_k_pred_long_all_1,
                    H_k_pred_long_all_0 = H_k_pred_long_all_0,
@@ -345,17 +590,32 @@ nuis_mod_surv <- function(model,
                    out_mod_1 = mod_1,
                    Surv_t_pred_long_all_list=temp_data_list)
   }
+  else if (model == "Outcome" & learner == "T-learner" & method == "Parametric"){
+    output <- list(S_k_pred_long_all_0 = S_k_pred_long_all_0,
+                   S_k_pred_long_all_1 = S_k_pred_long_all_1,
+                   out_mod_0 = mod_0,
+                   out_mod_1 = mod_1)
+  }
+  else if (model == "Outcome" & learner == "T-learner" & method == "Super learner"){
+    output <- list(pred_data_long_all_pred = pred_data_long_all,
+                   out_mod_0 = mod_0,
+                   out_mod_1 = mod_1)
+  }
   else if (model == "Propensity score"){
     output <- list(e_pred = pred,
                    e_mod = mod)
   }
-  else if (model == "Censoring"){
+  else if (model == "Censoring" & method == "Parametric"){
     output <- list(G_k_pred_long_all = G_k_pred_long_all,
                    G_mod = mod)
   }
-  else if (model == "Pseudo outcome"){
-    output <- list(po_pred = pred,
-                   po_mod = mod)
+  else if (model == "Censoring" & method == "Super learner"){
+    output <- list(G_k_pred_long_all = pred_data_long_all,
+                   G_mod = mod)
+  }
+  else if (model == "Pseudo outcome - Pooled logistic"){
+    output <- list(po_mod = mod,
+                   pred = pred_data_long_all)
   }
 
   return(output)
