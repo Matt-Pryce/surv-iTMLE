@@ -64,15 +64,21 @@ data_manage_surv <- function(data,
       vars <- c(id, time, outcome, censor, exposure)
       
       #For all analysis choices and both learners
-      vars <- append(vars,out_covariates)
-      if (learner == "survEP-learner"){     #Add others if functions when coding other functions
+      if (learner != "CSF"){
+        vars <- append(vars,out_covariates)  
+      }
+      if (learner == "survEP-learner" | learner == "M-learner"){     #Add others if functions when coding other functions
         vars <- append(vars,e_covariates)
         vars <- append(vars,g_covariates)
         vars <- append(vars,pse_covariates)
       }
-      
+      if (learner == "CSF"){
+        vars <- append(vars,e_covariates)
+        vars <- append(vars,pse_covariates)
+      }
+
       vars <- vars[!duplicated(vars)]
-        
+
       data <- subset(data,select = vars)
     },
     error=function(e) {
@@ -104,7 +110,7 @@ data_manage_surv <- function(data,
       if (splits != 1 & splits != 10){
         stop("Number of splits not compatible")
       }
-      
+
       #Creating splits
       data$s <- rep(1:length(data$Y),1) %% splits
     },
@@ -114,52 +120,52 @@ data_manage_surv <- function(data,
       print(e)
     }
   )
-  
-  
+
+
   #-------------------------------#
   #--- Creating long form data ---#
   #-------------------------------#
-  
+
   #--- Identifying event times ---#
   evts <- subset(data,data$Y == 1)                 #Keeping people who had an event
   evt_times <- evts$time                           #Collecting event dates
   evt_times_uni <- sort(unique(evt_times))         #Collecting unique dates
-  evt_times_uni0 <- c(0,evt_times_uni)             #Event times including 0 
-  
+  evt_times_uni0 <- c(0,evt_times_uni)             #Event times including 0
+
   #--- Creating data with one observation per person per time ---# (used in the targeting step)
-  
-  if (time_cuts[1] == "N/A"){
+
+  if (is.null(time_cuts) == 1){
     time_cuts <- evt_times_uni
-    time_cuts0 <- c(0,evt_times_uni)             #Event times including 0 
+    time_cuts0 <- c(0,evt_times_uni)             #Event times including 0
   }
   else {
     time_cuts0 <- c(0,time_cuts)
   }
-  
+
   #Pre-allocate a list to store dataframes
   data_long_list <- vector("list", length(time_cuts))
-  
+
   #Loop through evt_times_uni and store results in the list
   for (i in seq_along(time_cuts)) {
     data_long_temp <- data
     data_long_temp$time2 <- data_long_temp$time
     data_long_temp$tstart <- time_cuts0[i]
     data_long_temp$time <- time_cuts0[i + 1]
-    
+
     # Store the result in the list
     data_long_list[[i]] <- data_long_temp
   }
-  
+
   # Combine all dataframes into one
   data_long_all <- do.call(rbind, data_long_list)
-  
-  if (time_cuts[1] == "N/A"){
-    #Defining at risk indicators for this dataset 
+
+  if (is.null(time_cuts) == 1){
+    #Defining at risk indicators for this dataset
     data_long_all <- data_long_all %>% mutate(at_risk = case_when(
       time2 >= time ~ 1,
       time2 <  time ~ 0
     ))
-    
+
     data_long_all <- data_long_all %>% mutate(Y2 = case_when(
       time2==time & Y == 1 ~ 1,
       time2==time & Y == 0 ~ 0,
@@ -168,7 +174,6 @@ data_manage_surv <- function(data,
     ))
   }
   else {
-    # data_long_all <- arrange(data_long_all, ID, time)
     #Defining indicator for outcome occurring in that interval
     data_long_all <- data_long_all %>% mutate(Y2 = case_when(
       time2<=time & time2>tstart & Y == 1 ~ 1,
@@ -176,28 +181,88 @@ data_manage_surv <- function(data,
       time2>time          ~ 0,
       time2<time          ~ as.numeric(NA)
     ))
-    #Defining at risk indicators for this dataset   
+    #Defining at risk indicators for this dataset
     data_long_all <- data_long_all %>% mutate(at_risk = case_when(
       is.na(Y2) == 1 ~ 0,
       is.na(Y2) == 0 ~ 1
     ))
   }
 
-  
+
   #-----------------------#
   #--- Format new data ---#
   #-----------------------#
   tryCatch(
     {
-      if (learner == "T-learner"){
-        new_data_vars <- c(id,out_covariates)
-        newdata <- subset(newdata,select=new_data_vars)
-        names(newdata)[names(newdata) == id] <- "ID"
+      #NEW DATA MUST BE INPUT IN SHORT FORMAT
+      #--- Formating newdata variable names ---#
+      names(newdata)[names(newdata) == id] <- "ID"
+      names(newdata)[names(newdata) == outcome] <- "Y"
+      names(newdata)[names(newdata) == time] <- "time"
+      names(newdata)[names(newdata) == exposure] <- "A"
+
+      #--- Creating dataset with one observation per person at each time ---#
+      if (is.null(time_cuts) == 1){
+        time_cuts <- evt_times_uni
+        time_cuts0 <- c(0,evt_times_uni)             #Event times including 0
       }
-      if (learner != "T-learner"){               #NOTE SURE IF THIS NEEDS TO BE LONG OR SHORT, COME BACK TO THIS, SHORT FOR NOW
-        new_data_vars <- c(id,pse_covariates) #IF LONG, ADD TIME
-        newdata <- subset(newdata,select=new_data_vars)
-        names(newdata)[names(newdata) == id] <- "ID"
+      else {
+        time_cuts0 <- c(0,time_cuts)
+      }
+
+      #Pre-allocate a list to store dataframes
+      newdata_long_list <- vector("list", length(time_cuts))
+
+      #Loop through evt_times_uni and store results in the list
+      for (i in seq_along(time_cuts)) {
+        newdata_long_temp <- newdata
+        newdata_long_temp$time2 <- newdata_long_temp$time
+        newdata_long_temp$tstart <- time_cuts0[i]
+        newdata_long_temp$time <- time_cuts0[i + 1]
+
+        # Store the result in the list
+        newdata_long_list[[i]] <- newdata_long_temp
+      }
+
+      # Combine all dataframes into one
+      newdata_long_all <- do.call(rbind, newdata_long_list)
+
+      if (is.null(time_cuts) == 1){
+        #Defining at risk indicators for this dataset
+        data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+          time2 >= time ~ 1,
+          time2 <  time ~ 0
+        ))
+
+        data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+          time2==time & Y == 1 ~ 1,
+          time2==time & Y == 0 ~ 0,
+          time2>time          ~ 0,
+          time2<time          ~ as.numeric(NA)
+        ))
+      }
+      else {
+        #Defining indicator for outcome occurring in that interval
+        data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+          time2<=time & time2>tstart & Y == 1 ~ 1,
+          time2<=time & time2>tstart & Y == 0 ~ 0,
+          time2>time          ~ 0,
+          time2<time          ~ as.numeric(NA)
+        ))
+        #Defining at risk indicators for this dataset
+        data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+          is.na(Y2) == 1 ~ 0,
+          is.na(Y2) == 0 ~ 1
+        ))
+      }
+
+      if (learner == "survEP-learner" | learner == "M-learner"){
+        new_data_vars <- c("ID",pse_covariates,"time")
+        newdata_long_all <- subset(newdata_long_all,select=new_data_vars)
+      }
+      if (learner == "T-learner"){
+        new_data_vars <- c("ID",out_covariates,"tstart","time","A","Y")
+        newdata_long_all <- subset(newdata_long_all,select=new_data_vars)
       }
     },
     error=function(e) {
@@ -234,22 +299,25 @@ data_manage_surv <- function(data,
   #-----------------------------#
   #--- Returning information ---#
   #-----------------------------#
-  if (learner == "survEP-learner"){
+  if (learner == "survEP-learner" | learner == "M-learner" | learner == "T-learner" | learner == "CSF"){
     if (time_cuts[1] == "N/A"){
       output <- list(data=data,
                      data_long_all=data_long_all,
                      evt_times_uni=evt_times_uni,
                      evt_times_uni0=evt_times_uni0,
-                     newdata=newdata)
+                     newdata=newdata,
+                     newdata_long_all=newdata_long_all)
     }
     else {
       output <- list(data=data,
                      data_long_all=data_long_all,
                      evt_times_uni=time_cuts,
                      evt_times_uni0=time_cuts0,
-                     newdata=newdata)
+                     newdata=newdata,
+                     newdata_long_all=newdata_long_all)
     }
   }
   return(output)
 }
+
 
