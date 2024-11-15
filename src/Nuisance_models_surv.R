@@ -79,7 +79,13 @@ nuis_mod_surv <- function(model,
         covs_test <- pred_data_long_all[,covariates]
       }
       else if (model == "Pseudo outcome - Pooled logistic"){
-        train_data <- as.data.frame(subset(data,select = c("pse_Y","time",covariates)))
+        data <- data %>% mutate(pse_Y_cond = pse_Y - lag(pse_Y, default = 0))
+        data <- subset(data,select=-c(pse_Y))
+        data <- data %>% group_by(ID) %>% 
+          summarize(across(everything(), last),time=0,tstart=0,pse_Y_cond=0, .groups = "drop") %>%
+          bind_rows(data, .) %>% arrange(ID)
+        data <- data %>% arrange(ID, time) %>% group_by(ID)
+        train_data <- as.data.frame(subset(data,select = c("pse_Y_cond","time",covariates)))
       }
     },
     error=function(e) {
@@ -175,14 +181,17 @@ nuis_mod_surv <- function(model,
 
   if (model == "Pseudo outcome - Pooled logistic"){
     if (method == "Random forest"){
+      train_data$time <- as.factor(train_data$time)
       X <- as.matrix(subset(train_data, select = c(covariates,"time")))
-      mod <- regression_forest(X, train_data$pse_Y)
+      mod <- regression_forest(X, train_data$pse_Y_cond)
     }
     else if (method == "Parametric"){
-      mod <- lm(pse_Y ~ . , data = train_data)
+      train_data$time <- as.factor(train_data$time)
+      mod <- lm(pse_Y_cond ~ . , data = train_data)
     }
     else if (method == "Super learner"){
-      mod <- SuperLearner(Y = train_data$pse_Y, X = data.frame(subset(train_data, select = c(covariates,"time"))),
+      train_data$time <- as.factor(train_data$time)
+      mod <- SuperLearner(Y = train_data$pse_Y_cond, X = data.frame(subset(train_data, select = c(covariates,"time"))),
                           method = "method.NNLS",
                           family = gaussian(),
                           cvControl = list(V = 10, stratifyCV=FALSE),
@@ -530,6 +539,7 @@ nuis_mod_surv <- function(model,
   if (model == "Pseudo outcome - Pooled logistic"){
     pred_data_long_all <- pred_data_long_all[order(pred_data_long_all$ID,pred_data_long_all$time),]
     pred_data <- subset(pred_data_long_all, select = c(covariates,"time"))
+    pred_data$time <- as.factor(pred_data$time)
     if (method == "Parametric"){
       #Obtaining conditional predictions
       pred_data_long_all$pred_cond <- predict(mod, pred_data, type = "response")
