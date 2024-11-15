@@ -163,6 +163,7 @@ survEP_learner <- function(data,
         #Creating datasets for obtaining model predictions
         po_e_data_long_all <- subset(analysis_data_long_all, select = c(e_covariates,"s"))
         po_e_data_long_all <- subset(po_e_data_long_all, po_e_data_long_all$s == i)
+        po_e_data_long_all <- subset(po_e_data_long_all, select = c(e_covariates))
 
         po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","tstart","time",out_covariates,"s","at_risk"))
         po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
@@ -339,15 +340,15 @@ survEP_learner <- function(data,
 
     X <- as.matrix(subset(sieve_data, select=pse_covariates))
     if (is.null(sieve_dim) == TRUE){
-      basisN <- ceiling((nrow(analysis_data))^(1/3)*ncol(X))  
+      basisN <- ceiling((nrow(analysis_data))^(1/3)*ncol(X))
     }
     else {
       basisN <- sieve_dim
     }
     basisN <- basisN + 1
-    
+
     if (is.null(sieve_interaction) == TRUE){
-      interaction_order <- 2  
+      interaction_order <- 2
     }
     else {
       interaction_order <- sieve_interaction
@@ -699,13 +700,13 @@ survEP_learner <- function(data,
           TMLE_output <- append(TMLE_output,list(final_tp_ests))
         }
       }
-      
-      if (target_option == "Lasso - Linear - Option 1"){  
+
+      if (target_option == "Lasso - Linear - Option 1"){
         #Steps:
-        #   - If iteration 1, then for each time run lasso and save list of covarites with no zero coefs 
+        #   - If iteration 1, then for each time run lasso and save list of covarites with no zero coefs
         #   - If iteration >1 then just run linear with saved covs
-        #   - Run linear reg and update preds 
-        
+        #   - Run linear reg and update preds
+
         if (t_step == 1){
           lasso_cov_list <- vector(mode = "list", length = t)
         }
@@ -721,7 +722,7 @@ survEP_learner <- function(data,
             #Setting up lasso model
             lasso_mod_covs <- sieve_names
             X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-            
+
             #Running lasso model
             lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                    intercept = FALSE,
@@ -745,9 +746,9 @@ survEP_learner <- function(data,
             #Adding to list
             lasso_cov_list[[tp]] <- nonzero_covariates
           }
-          
+
           linear_mod_covs <- lasso_cov_list[[tp]]
-          
+
           #Adding in check to see if no covariates were specified
           if (length(linear_mod_covs) != 0){
             #Setting up linear regression model
@@ -774,7 +775,7 @@ survEP_learner <- function(data,
               eps_data[ 1, i] <- new_col
               colnames(eps_data)[i] <- paste0("V", i,"_coef_est")
             }
-            
+
             #Collecting sieve basis to keep    (The next few lines remove surplus covs and allows for us to update hazard easier)
             sieve_basis_keep <- training_data[,linear_mod_covs]
 
@@ -815,12 +816,12 @@ survEP_learner <- function(data,
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Do not update hazards
             training_data$h_k_pred_1_star <- training_data$h_k_pred_1
             training_data$h_k_pred_0_star <- training_data$h_k_pred_0
           }
-  
+
           #Recollecting full data
           if (tp == 1){
             training_data_all <- training_data
@@ -831,7 +832,7 @@ survEP_learner <- function(data,
             # eps_data_all <- rbind(eps_data_all,eps_data)
           }
         }
-        
+
         targeting_data <- training_data_all
 
         #--- Checks to see if model has converged ---#
@@ -884,60 +885,60 @@ survEP_learner <- function(data,
         }
       }
 
-      if (target_option == "Lasso - Linear - Option 2"){  
-        #For each time run lasso and save list of covariates with no zero coefs 
-        #Run linear reg and update preds 
-        
+      if (target_option == "Lasso - Linear - Option 2"){
+        #For each time run lasso and save list of covariates with no zero coefs
+        #Run linear reg and update preds
+
         #List fro storing covs used
         cov_list <- list()
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
-          
+
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
-          
+
           #Setting up lasso model
           lasso_mod_covs <- sieve_names
           X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-          
+
           #Running lasso model
           lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                  intercept = FALSE,
                                  alpha = 1,
                                  offset = training_data_at_risk$h_k_pred_a,
                                  weights = training_data_at_risk$H_a)
-          
+
           # Choose a lambda value
           lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-          
+
           # Extract coefficients at the chosen lambda
           coef_matrix <- coef(lasso_mod, s = lambda_value)
-          
+
           # Get the indices of non-zero coefficients
           nonzero_indices <- which(coef_matrix != 0)
-            
+
           # Extract the names of non-zero coefficients (excluding the intercept)
           nonzero_covariates <- rownames(coef_matrix)[nonzero_indices]
           nonzero_covariates <- nonzero_covariates[nonzero_covariates != "(Intercept)"]  # Remove intercept
-          
+
           #Setting up linear regression model
           linear_mod_covs <- nonzero_covariates
           cov_list <- append(cov_list,linear_mod_covs)
-          
+
           #Adding in check to see if no covariates were specified
           if (length(linear_mod_covs) != 0){
             fmla <- as.formula(paste("Y2 ~ ", paste(linear_mod_covs, collapse= "+"),"-1"))    #-1 indicators no intercept term
-            
+
             #Running linear regression
             fluc_mod <- lm(fmla,
                            data = training_data_at_risk,
                            offset=training_data_at_risk$h_k_pred_a,
                            weights = training_data_at_risk$H_a)
-            
+
             #Obtaining model coefficients
             eps <- coef(fluc_mod)
-            
+
             #Making sure no coefs are NA
             for (i in 1:length(eps)){
               if (is.na(eps[i])==1){
@@ -950,29 +951,29 @@ survEP_learner <- function(data,
               eps_data[ 1, i] <- new_col
               colnames(eps_data)[i] <- paste0("V", i,"_coef_est")
             }
-            
+
             #Collecting sieve basis to keep    (The next few lines remove surplus covs and allows for us to update hazard easier)
             sieve_basis_keep <- training_data[,linear_mod_covs]
-            
+
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Count how many covs now
             num_covs_pre_sieve_new <- ncol(training_data)
-            
+
             #Adding back in only ones which were used
             training_data <- cbind(training_data,sieve_basis_keep)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_new <- ncol(training_data)
-            
+
             #Adding in coeficient estimates
             training_data <- merge(training_data,eps_data,all.x = T)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_coef_new <- ncol(training_data)
-            
+
             #Creating updated hazard estimates
             training_data$h_k_pred_1_star <- training_data$h_k_pred_1
             training_data$h_k_pred_0_star <- training_data$h_k_pred_0
@@ -982,7 +983,7 @@ survEP_learner <- function(data,
               training_data$h_k_pred_0_star <- training_data$h_k_pred_0_star + training_data[[num_covs_pre_sieve_new+cov]]*
                 training_data[[num_covs_post_sieve_new+cov]]
             }
-            
+
             #Remove sieve covs/coefs
             keep_cov_list <- c(1:num_covs_pre_sieve_new,(num_covs_post_sieve_coef_new+1):(num_covs_post_sieve_coef_new+2))
             training_data <- training_data[,keep_cov_list]
@@ -991,12 +992,12 @@ survEP_learner <- function(data,
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Do not update hazards
             training_data$h_k_pred_1_star <- training_data$h_k_pred_1
             training_data$h_k_pred_0_star <- training_data$h_k_pred_0
           }
-          
+
           #Recollecting full data
           if (tp == 1){
             training_data_all <- training_data
@@ -1007,7 +1008,7 @@ survEP_learner <- function(data,
             # eps_data_all <- rbind(eps_data_all,eps_data)
           }
         }
-        
+
         targeting_data <- training_data_all
 
         #--- Checks to see if model has converged ---#
@@ -1059,42 +1060,42 @@ survEP_learner <- function(data,
           TMLE_output <- append(TMLE_output,list(final_tp_ests))
         }
       }
-      
-      if (target_option == "Lasso - Linear - Option 3"){  
-        #For each time run lasso and save list of covariates with no zero coefs 
-        #Run linear reg and update preds 
+
+      if (target_option == "Lasso - Linear - Option 3"){
+        #For each time run lasso and save list of covariates with no zero coefs
+        #Run linear reg and update preds
         cov_list <- list()
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
-          
+
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
-          
+
           #Setting up lasso model
           lasso_mod_covs <- sieve_names
           X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-          
+
           #Running lasso model
           lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                  intercept = FALSE,
                                  alpha = 1,
                                  offset = training_data_at_risk$h_k_pred_a,
                                  weights = training_data_at_risk$H_a)
-          
+
           # Choose a lambda value
           lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-          
+
           # Extract coefficients at the chosen lambda
           coef_matrix <- coef(lasso_mod, s = lambda_value)
-          
+
           # Get the indices of non-zero coefficients
           nonzero_indices <- which(coef_matrix != 0)
           nonzero_covariates_val <- coef_matrix[nonzero_indices]
           nonzero_covariates_names <- rownames(coef_matrix)[nonzero_indices]
-          
+
           cov_list <- append(cov_list,nonzero_covariates_names)
-          
+
           if (length(nonzero_indices) != 0){
             #Creating dataset
             eps_data <- as.data.frame(matrix(nrow = 1, ncol=length(nonzero_indices)))
@@ -1103,17 +1104,17 @@ survEP_learner <- function(data,
               eps_data[1,i] <- new_col
               colnames(eps_data)[i] <- paste(nonzero_covariates_names[i],"_coef",sep="")
             }
-            
+
             #Collecting sieve basis to keep    (The next few lines remove surplus covs and allows for us to update hazard easier)
             sieve_basis_keep <- training_data[,nonzero_covariates_names]
-            
+
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Count how many covs now
             num_covs_pre_sieve_new <- ncol(training_data)
-            
+
             #Adding back in only ones which were used
             training_data <- cbind(training_data,sieve_basis_keep)
 
@@ -1122,7 +1123,7 @@ survEP_learner <- function(data,
 
             #Adding in coeficient estimates
             training_data <- merge(training_data,eps_data,all.x = T)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_coef_new <- ncol(training_data)
 
@@ -1144,7 +1145,7 @@ survEP_learner <- function(data,
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Do not update hazards
             training_data$h_k_pred_1_star <- training_data$h_k_pred_1
             training_data$h_k_pred_0_star <- training_data$h_k_pred_0
@@ -1201,7 +1202,7 @@ survEP_learner <- function(data,
         #--- Saving information from iteration ---#
         iter_output <- list(data=targeting_data,
                             cov_list=cov_list)
-        
+
         TMLE_output <- append(TMLE_output,list(iter_output))
 
         if (TMLE_iter_complete == 1){
@@ -1212,30 +1213,30 @@ survEP_learner <- function(data,
           TMLE_output <- append(TMLE_output,list(final_tp_ests))
         }
       }
-      
-      if (target_option == "Lasso - Logistic - Option 1"){  
+
+      if (target_option == "Lasso - Logistic - Option 1"){
         #Steps:
-        #   - If iteration 1, then for each time run lasso and save list of covarites with no zero coefs 
+        #   - If iteration 1, then for each time run lasso and save list of covarites with no zero coefs
         #   - If iteration >1 then just run logistic with saved covs
-        #   - Run linear reg and update preds 
-        
+        #   - Run linear reg and update preds
+
         if (t_step == 1){
           lasso_cov_list <- vector(mode = "list", length = t)
         }
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
-          
+
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
           training_data_at_risk <- subset(training_data_at_risk,training_data_at_risk$h_k_pred_a != 0 & training_data_at_risk$h_k_pred_a != 1)
-          
+
           #If iteration 1, run lasso model
           if (t_step == 1){
             #Setting up lasso model
             lasso_mod_covs <- sieve_names
             X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-            
+
             #Running lasso model
             lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                    intercept = FALSE,
@@ -1243,7 +1244,7 @@ survEP_learner <- function(data,
                                    offset = qlogis(training_data_at_risk$h_k_pred_a),
                                    weights = training_data_at_risk$H_a,
                                    family = "binomial")
-            
+
             # Choose a lambda value
             lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
 
@@ -1260,7 +1261,7 @@ survEP_learner <- function(data,
             #Adding to list
             lasso_cov_list[[tp]] <- nonzero_covariates
           }
-          
+
           logistic_mod_covs <- lasso_cov_list[[tp]]
 
           #Adding in check to see if no covariates were specified
@@ -1324,7 +1325,7 @@ survEP_learner <- function(data,
             }
             training_data$h_k_pred_1_star <- plogis(training_data$h_k_pred_1_star_temp)
             training_data$h_k_pred_0_star <- plogis(training_data$h_k_pred_0_star_temp)
-            
+
             #Remove sieve covs/coefs
             keep_cov_list <- c(1:num_covs_pre_sieve_new,(num_covs_post_sieve_coef_new+3):(num_covs_post_sieve_coef_new+4))
             training_data <- training_data[,keep_cov_list]
@@ -1349,7 +1350,7 @@ survEP_learner <- function(data,
             # eps_data_all <- rbind(eps_data_all,eps_data)
           }
         }
-        
+
         targeting_data <- training_data_all
 
         #--- Checks to see if model has converged ---#
@@ -1390,7 +1391,7 @@ survEP_learner <- function(data,
         #--- Saving information from iteration ---#
         iter_output <- list(data=targeting_data,
                             cov_list=lasso_cov_list)
-        
+
         TMLE_output <- append(TMLE_output,list(iter_output))
 
         if (TMLE_iter_complete == 1){
@@ -1401,23 +1402,23 @@ survEP_learner <- function(data,
           TMLE_output <- append(TMLE_output,list(final_tp_ests))
         }
       }
-      
-      if (target_option == "Lasso - Logistic - Option 2"){  
-        #For each time run lasso and save list of covariates with no zero coefs 
-        #Run linear reg and update preds 
+
+      if (target_option == "Lasso - Logistic - Option 2"){
+        #For each time run lasso and save list of covariates with no zero coefs
+        #Run linear reg and update preds
         cov_list <- list()
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
-          
+
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
           training_data_at_risk <- subset(training_data_at_risk,training_data_at_risk$h_k_pred_a != 0 & training_data_at_risk$h_k_pred_a != 1)
-          
+
           #Setting up lasso model
           lasso_mod_covs <- sieve_names
           X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-          
+
           #Running lasso model
           lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                  intercept = FALSE,
@@ -1425,24 +1426,24 @@ survEP_learner <- function(data,
                                  offset = qlogis(training_data_at_risk$h_k_pred_a),
                                  weights = training_data_at_risk$H_a,
                                  family = "binomial")
-          
+
           # Choose a lambda value
           lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-          
+
           # Extract coefficients at the chosen lambda
           coef_matrix <- coef(lasso_mod, s = lambda_value)
-          
+
           # Get the indices of non-zero coefficients
           nonzero_indices <- which(coef_matrix != 0)
-          
+
           # Extract the names of non-zero coefficients (excluding the intercept)
           nonzero_covariates <- rownames(coef_matrix)[nonzero_indices]
           nonzero_covariates <- nonzero_covariates[nonzero_covariates != "(Intercept)"]  # Remove intercept
-          
+
           #Setting up linear regression model
           logistic_mod_covs <- nonzero_covariates
           cov_list <- append(cov_list,logistic_mod_covs)
-          
+
           #Adding in check to see if no covariates were specified
           if (length(logistic_mod_covs) != 0){
             fmla <- as.formula(paste("Y2 ~ ", paste(logistic_mod_covs, collapse= "+"),"-1"))    #-1 indicators no intercept term
@@ -1453,10 +1454,10 @@ survEP_learner <- function(data,
                             offset=qlogis(training_data_at_risk$h_k_pred_a),
                             weights = training_data_at_risk$H_a,
                             family = quasibinomial())
-            
+
             #Obtaining model coefficients
             eps <- coef(fluc_mod)
-            
+
             #Making sure no coefs are NA
             for (i in 1:length(eps)){
               if (is.na(eps[i])==1){
@@ -1472,26 +1473,26 @@ survEP_learner <- function(data,
 
             #Collecting sieve basis to keep    (The next few lines remove surplus covs and allows for us to update hazard easier)
             sieve_basis_keep <- training_data[,logistic_mod_covs]
-            
+
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Count how many covs now
             num_covs_pre_sieve_new <- ncol(training_data)
-            
+
             #Adding back in only ones which were used
             training_data <- cbind(training_data,sieve_basis_keep)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_new <- ncol(training_data)
-            
+
             #Adding in coeficient estimates
             training_data <- merge(training_data,eps_data,all.x = T)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_coef_new <- ncol(training_data)
-            
+
             #Creating updated hazard estimates
             training_data$h_k_pred_1_star_temp <- qlogis(training_data$h_k_pred_1)
             training_data$h_k_pred_0_star_temp <- qlogis(training_data$h_k_pred_0)
@@ -1503,7 +1504,7 @@ survEP_learner <- function(data,
             }
             training_data$h_k_pred_1_star <- plogis(training_data$h_k_pred_1_star_temp)
             training_data$h_k_pred_0_star <- plogis(training_data$h_k_pred_0_star_temp)
-            
+
             #Remove sieve covs/coefs
             keep_cov_list <- c(1:num_covs_pre_sieve_new,(num_covs_post_sieve_coef_new+3):(num_covs_post_sieve_coef_new+4))
             training_data <- training_data[,keep_cov_list]
@@ -1528,7 +1529,7 @@ survEP_learner <- function(data,
             # eps_data_all <- rbind(eps_data_all,eps_data)
           }
         }
-        
+
         targeting_data <- training_data_all
 
         #--- Checks to see if model has converged ---#
@@ -1580,22 +1581,22 @@ survEP_learner <- function(data,
           TMLE_output <- append(TMLE_output,list(final_tp_ests))
         }
       }
-      
-      if (target_option == "Lasso - Logistic - Option 3"){  
-        #For each time run lasso 
+
+      if (target_option == "Lasso - Logistic - Option 3"){
+        #For each time run lasso
         cov_list <- list()
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
-          
+
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
           training_data_at_risk <- subset(training_data_at_risk,training_data_at_risk$h_k_pred_a != 0 & training_data_at_risk$h_k_pred_a != 1)
-          
+
           #Setting up lasso model
           lasso_mod_covs <- sieve_names
           X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-          
+
           #Running lasso model
           lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                  intercept = FALSE,
@@ -1603,20 +1604,20 @@ survEP_learner <- function(data,
                                  offset = qlogis(training_data_at_risk$h_k_pred_a),
                                  weights = training_data_at_risk$H_a,
                                  family = "binomial")
-          
+
           # Choose a lambda value
           lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-          
+
           # Extract coefficients at the chosen lambda
           coef_matrix <- coef(lasso_mod, s = lambda_value)
-          
+
           # Get the indices of non-zero coefficients
           nonzero_indices <- which(coef_matrix != 0)
           nonzero_covariates_val <- coef_matrix[nonzero_indices]
           nonzero_covariates_names <- rownames(coef_matrix)[nonzero_indices]
-          
+
           cov_list <- append(cov_list,nonzero_covariates_names)
-          
+
           if (length(nonzero_indices) != 0){
             #Creating dataset
             eps_data <- as.data.frame(matrix(nrow = 1, ncol=length(nonzero_indices)))
@@ -1625,29 +1626,29 @@ survEP_learner <- function(data,
               eps_data[1,i] <- new_col
               colnames(eps_data)[i] <- paste(nonzero_covariates_names[i],"_coef",sep="")
             }
-            
+
             #Collecting sieve basis to keep    (The next few lines remove surplus covs and allows for us to update hazard easier)
             sieve_basis_keep <- training_data[,nonzero_covariates_names]
-            
+
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Count how many covs now
             num_covs_pre_sieve_new <- ncol(training_data)
-            
+
             #Adding back in only ones which were used
             training_data <- cbind(training_data,sieve_basis_keep)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_new <- ncol(training_data)
-            
+
             #Adding in coeficient estimates
             training_data <- merge(training_data,eps_data,all.x = T)
-            
+
             #Counting how many covs at this point
             num_covs_post_sieve_coef_new <- ncol(training_data)
-            
+
             #Creating updated hazard estimates
             training_data$h_k_pred_1_star_temp <- qlogis(training_data$h_k_pred_1)
             training_data$h_k_pred_0_star_temp <- qlogis(training_data$h_k_pred_0)
@@ -1659,7 +1660,7 @@ survEP_learner <- function(data,
             }
             training_data$h_k_pred_1_star <- plogis(training_data$h_k_pred_1_star_temp)
             training_data$h_k_pred_0_star <- plogis(training_data$h_k_pred_0_star_temp)
-            
+
             #Remove sieve covs/coefs
             keep_cov_list <- c(1:num_covs_pre_sieve_new,(num_covs_post_sieve_coef_new+3):(num_covs_post_sieve_coef_new+4))
             training_data <- training_data[,keep_cov_list]
@@ -1668,12 +1669,12 @@ survEP_learner <- function(data,
             #Removing sieve basis covs
             covs_not_sieve <- c(1:num_covs_pre_sieve,(num_covs_post_sieve+1):dim(training_data)[2])
             training_data <- training_data[,covs_not_sieve]
-            
+
             #Do not update hazards
             training_data$h_k_pred_1_star <- training_data$h_k_pred_1
             training_data$h_k_pred_0_star <- training_data$h_k_pred_0
           }
-          
+
           #Recollecting full data
           if (tp == 1){
             training_data_all <- training_data
@@ -1684,9 +1685,9 @@ survEP_learner <- function(data,
             # eps_data_all <- rbind(eps_data_all,eps_data)
           }
         }
-        
+
         targeting_data <- training_data_all
-        
+
         #--- Checks to see if model has converged ---#
         if (t_step < 3){
           TMLE_iter_complete <- 0
@@ -1725,7 +1726,7 @@ survEP_learner <- function(data,
         #--- Saving information from iteration ---#
         iter_output <- list(data=targeting_data,
                             cov_list=cov_list)
-        
+
         TMLE_output <- append(TMLE_output,list(iter_output))
 
         if (TMLE_iter_complete == 1){
@@ -1822,7 +1823,8 @@ survEP_learner <- function(data,
   if (pse_approach == "Pooled logistic"){
     output <- list(TMLE_output=list(TMLE_output_all),
                    data_with_preds=pred_dataset_all,
-                   predictions=pse_model$pred)
+                   predictions=pse_model$pred,
+                   check <- pse_model)
   }
   else {
     output <- list(TMLE_output=list(TMLE_output_all),
@@ -1846,9 +1848,58 @@ event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph"), fu
   c(alg,"All")
 })
 
-# event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc"), function(alg) {
-#   c(alg, "survscreen.glmnet","All")
-# })
+event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
+                                                "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
+                                                  c(alg, "survscreen.glmnet", "survscreen.marg", "All")
+})
+
+
+e_lib <- c("SL.mean",
+           "SL.glm")#,
+           # "SL.glmnet_8", "SL.glmnet_9",
+           # "SL.glmnet_11", "SL.glmnet_12",
+           # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
+           # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
+           # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
+           # "SL.svm_1",
+           # "SL.kernelKnn_4","SL.kernelKnn_10")
+
+#--- Creating learners for SL library's ---#
+#LASSO & elastic net
+nlambda_seq = c(50,100,250)
+alpha_seq <- c(0.5,1)
+usemin_seq <- c(FALSE,TRUE)
+para_learners = create.Learner("SL.glmnet", tune = list(nlambda = nlambda_seq,alpha = alpha_seq,useMin = usemin_seq))
+para_learners
+
+#Random forest - One covariate
+mtry_seq1 <-  1
+min_node_seq <- c(10,20,50)
+rf_learners1 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq1, min.node.size = min_node_seq))
+rf_learners1
+
+mtry_seq6 <-  floor(sqrt(6) * c(0.5, 1))
+min_node_seq <- c(10,20,50)
+rf_learners6 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq6, min.node.size = min_node_seq))
+rf_learners6
+
+
+#Nnet (single layer neural nets)
+size_seq <- c(1,2,5)
+nnet_learners <- create.Learner("SL.nnet",tune = list(size = size_seq))
+
+#SVM (Support vector machine)
+nu_seq <- c(1)
+type_seq <- c("C-classification")
+svm_learners = create.Learner("SL.svm",tune = list(type.class = type_seq))
+
+#KernelKnn
+K_seq <- c(5,10,20)
+h_seq <- c(0.01,0.05,0.1,0.25)
+KernelKnn_learners <- create.Learner("SL.kernelKnn",tune = list(k = K_seq, h = h_seq))
+
+
+
 
 start_time <- proc.time()
 
@@ -1862,7 +1913,7 @@ survEP_check <- survEP_learner(data = ACTG175_data,
                                splits = 1,
                                e_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
                                e_method = "Parametric",
-                               e_SL_lib = c("SL.glm"),
+                               e_SL_lib = e_lib,
                                out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
                                out_method = "Parametric",
                                out_SL_lib = event.SL.library,
@@ -1870,16 +1921,18 @@ survEP_check <- survEP_learner(data = ACTG175_data,
                                g_method = "Parametric",
                                g_SL_lib = event.SL.library,
                                iso_reg = FALSE,
-                               pse_covariates = c("age"),#,"wtkg","hemo","homo","drugs","karnof"),
-                               pse_approach = "None",
+                               pse_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+                               pse_approach = "Pooled logistic",
                                pse_method = "Parametric",
-                               pse_SL_lib = c("SL.lm"),
+                               pse_SL_lib = c("SL.mean",
+                                              "SL.lm",
+                                              "SL.glmnet_8", "SL.glmnet_9",
+                                              "SL.glmnet_11", "SL.glmnet_12",
+                                              "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
                                newdata = ACTG175_data,
-                               target_option = "Lasso - Linear - Option 3")#,
+                               target_option = "Lasso - Logistic - Option 1")#,
                                # sieve_dim = 15,
                                # sieve_interaction = 2)
-
-
 end_time <- proc.time()
 end_time - start_time
 
