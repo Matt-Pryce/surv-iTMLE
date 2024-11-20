@@ -95,7 +95,9 @@ survEP_learner <- function(data,
                            newdata,
                            target_option,
                            sieve_dim = NULL,
-                           sieve_interaction = NULL
+                           sieve_interaction = NULL,
+                           CI = FALSE,
+                           num_boot = 200
 ){
   #-----------------------#
   #--- Data management ---#
@@ -598,7 +600,7 @@ survEP_learner <- function(data,
         }
       }
 
-      if (target_option == "Logistic"){   #Coeficients end up very large even when collapsing data
+      if (target_option == "Logistic"){   #POssibly remove as this should be linear in practice 
         for (tp in 1:t){
           #Limiting to that time point
           training_data <- subset(targeting_data,targeting_data$time == clean_data$evt_times_uni[tp])
@@ -1804,9 +1806,9 @@ survEP_learner <- function(data,
   #--- Pseudo-outcome regression ---#
   #---------------------------------#
   #--- Pooled logistic regression ---#
-  if (pse_approach == "Pooled logistic"){
+  if (pse_approach == "Pooled"){
     pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
-    pse_model <- nuis_mod_surv(model = "Pseudo outcome - Pooled logistic",
+    pse_model <- nuis_mod_surv(model = "Pseudo outcome - Pooled",
                                      data = pred_dataset_all,
                                      method = pse_method,
                                      covariates = pse_covariates,
@@ -1817,10 +1819,101 @@ survEP_learner <- function(data,
     pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
   }
 
+  
+  #-----------------------#
+  #--- Generating CI's ---#
+  #-----------------------#
+  
+  if (CI == TRUE & pse_approach == "Pooled" & pse_method == "Random forest"){
+    unique_ids <- unique(pred_dataset_all$ID)
+    for (i in 1:num_boot){
+      # Randomly sample half the rows
+      set.seed(596967 + i)  # Set seed for reproducibility
+      selected_ids <- sample(unique_ids, floor(length(unique_ids) / 2), replace = FALSE)
+      half_sample <- pred_dataset_all[pred_dataset_all$ID %in% selected_ids, ]
+      half_sample <- half_sample %>% arrange(ID, time)
+      
+      #Running final stage model
+      tuned_parameters <- pse_model$po_mod$tunable.params
+      tryCatch(
+        {
+          pse_model_hs <- nuis_mod_surv(model = "Pseudo outcome - Pooled - CI",
+                                        data = half_sample,
+                                        method = pse_method,
+                                        covariates = pse_covariates,
+                                        SL_lib = pse_SL_lib,
+                                        pred_data_long_all = clean_data$newdata_long_all,
+                                        CI_tuned_params = tuned_parameters)
+
+          half_sample_est <- pse_model_hs$pred
+        },
+        #if an error occurs, tell me the error
+        error=function(e) {
+          stop(paste("An error occured when fitting the pseudo outcome model in split ",i,sep=""))
+          print(e)
+        }
+      )
+
+      #Creating R and storing
+      full_sample_est <- pse_model$pred$pred
+
+      R <- full_sample_est - half_sample_est
+
+      if (i == 1){
+        R_data <- as.data.frame(R)
+      }
+      else {
+        R_data <- cbind(R_data,R)
+      }
+    }
+    
+    #Gaining variance of R per person
+    CI_n_rows <- length(full_sample_est)
+    for (i in 1:CI_n_rows){
+      # sqrt_n <- sqrt(num_boot)
+      # temp <-  sqrt_n * R_data[i,]
+      # var <- apply(temp, MARGIN = 1, FUN = var)
+      # SE <- sqrt(var)
+      # 
+      # LCI <- pse_model$po_pred[i,] - (1/sqrt_n)*SE*1.96
+      # UCI <- pse_model$po_pred[i,] + (1/sqrt_n)*SE*1.96
+
+      temp <-  R_data[i,]
+      var <- apply(temp, MARGIN = 1, FUN = var)
+      SE <- sqrt(var)
+
+      LCI <- full_sample_est[i] - SE*1.96
+      UCI <- full_sample_est[i] + SE*1.96
+
+      if (i == 1){
+        LCI_data <- LCI
+        UCI_data <- UCI
+      }
+      else {
+        LCI_data <- append(LCI_data,LCI)
+        UCI_data <- append(UCI_data,UCI)
+      }
+    }
+  }
+  else if (CI == TRUE & pse_approach == "Pooled" & pse_method != "Random forest"){
+    return("Inappropriate pseudo-outcome regression method for obtaining CI's")
+  }
+  
+  
+  
+  
   #--------------#
   #--- Output ---#
   #--------------#
-  if (pse_approach == "Pooled logistic"){
+  if (pse_approach == "Pooled" &  CI == TRUE){
+    output <- list(TMLE_output=list(TMLE_output_all),
+                   data_with_preds=pred_dataset_all,
+                   predictions=pse_model$pred,
+                   CATE_LCI = LCI_data,
+                   CATE_UCI = UCI_data,
+                   check <- pse_model)
+  }
+  else if (pse_approach == "Pooled" &  CI == FALSE){
     output <- list(TMLE_output=list(TMLE_output_all),
                    data_with_preds=pred_dataset_all,
                    predictions=pse_model$pred,
@@ -1834,107 +1927,110 @@ survEP_learner <- function(data,
 }
 
 
-
-
-#---------------#
-#--- Example ---#
-#---------------#
-load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
-
-#Defining censoring indicator
-ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
-
-event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph"), function(alg) {
-  c(alg,"All")
-})
-
-event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
-                                                "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
-                                                  c(alg, "survscreen.glmnet", "survscreen.marg", "All")
-})
-
-
-e_lib <- c("SL.mean",
-           "SL.glm")#,
-           # "SL.glmnet_8", "SL.glmnet_9",
-           # "SL.glmnet_11", "SL.glmnet_12",
-           # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
-           # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
-           # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
-           # "SL.svm_1",
-           # "SL.kernelKnn_4","SL.kernelKnn_10")
-
-#--- Creating learners for SL library's ---#
-#LASSO & elastic net
-nlambda_seq = c(50,100,250)
-alpha_seq <- c(0.5,1)
-usemin_seq <- c(FALSE,TRUE)
-para_learners = create.Learner("SL.glmnet", tune = list(nlambda = nlambda_seq,alpha = alpha_seq,useMin = usemin_seq))
-para_learners
-
-#Random forest - One covariate
-mtry_seq1 <-  1
-min_node_seq <- c(10,20,50)
-rf_learners1 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq1, min.node.size = min_node_seq))
-rf_learners1
-
-mtry_seq6 <-  floor(sqrt(6) * c(0.5, 1))
-min_node_seq <- c(10,20,50)
-rf_learners6 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq6, min.node.size = min_node_seq))
-rf_learners6
-
-
-#Nnet (single layer neural nets)
-size_seq <- c(1,2,5)
-nnet_learners <- create.Learner("SL.nnet",tune = list(size = size_seq))
-
-#SVM (Support vector machine)
-nu_seq <- c(1)
-type_seq <- c("C-classification")
-svm_learners = create.Learner("SL.svm",tune = list(type.class = type_seq))
-
-#KernelKnn
-K_seq <- c(5,10,20)
-h_seq <- c(0.01,0.05,0.1,0.25)
-KernelKnn_learners <- create.Learner("SL.kernelKnn",tune = list(k = K_seq, h = h_seq))
-
-
-
-
-start_time <- proc.time()
-
-survEP_check <- survEP_learner(data = ACTG175_data,
-                               id = "pidnum",
-                               time = "days",
-                               outcome = "cens",
-                               censor = "censor_ind",
-                               exposure = "treat",
-                               time_cuts = seq(from=200,to=1100,by=100),
-                               splits = 1,
-                               e_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               e_method = "Parametric",
-                               e_SL_lib = e_lib,
-                               out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               out_method = "Parametric",
-                               out_SL_lib = event.SL.library,
-                               g_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               g_method = "Parametric",
-                               g_SL_lib = event.SL.library,
-                               iso_reg = FALSE,
-                               pse_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               pse_approach = "Pooled logistic",
-                               pse_method = "Parametric",
-                               pse_SL_lib = c("SL.mean",
-                                              "SL.lm",
-                                              "SL.glmnet_8", "SL.glmnet_9",
-                                              "SL.glmnet_11", "SL.glmnet_12",
-                                              "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
-                               newdata = ACTG175_data,
-                               target_option = "Lasso - Logistic - Option 1")#,
-                               # sieve_dim = 15,
-                               # sieve_interaction = 2)
-end_time <- proc.time()
-end_time - start_time
+# 
+# 
+# #---------------#
+# #--- Example ---#
+# #---------------#
+# load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
+# 
+# #Defining censoring indicator
+# ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+# ACTG175_data <- ACTG175_data[1:800,]
+# 
+# event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph"), function(alg) {
+#   c(alg,"All")
+# })
+# 
+# event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
+#                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
+#                                                   c(alg, "survscreen.glmnet", "survscreen.marg", "All")
+# })
+# 
+# 
+# e_lib <- c("SL.mean",
+#            "SL.glm")#,
+#            # "SL.glmnet_8", "SL.glmnet_9",
+#            # "SL.glmnet_11", "SL.glmnet_12",
+#            # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
+#            # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
+#            # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
+#            # "SL.svm_1",
+#            # "SL.kernelKnn_4","SL.kernelKnn_10")
+# 
+# #--- Creating learners for SL library's ---#
+# #LASSO & elastic net
+# nlambda_seq = c(50,100,250)
+# alpha_seq <- c(0.5,1)
+# usemin_seq <- c(FALSE,TRUE)
+# para_learners = create.Learner("SL.glmnet", tune = list(nlambda = nlambda_seq,alpha = alpha_seq,useMin = usemin_seq))
+# para_learners
+# 
+# #Random forest - One covariate
+# mtry_seq1 <-  1
+# min_node_seq <- c(10,20,50)
+# rf_learners1 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq1, min.node.size = min_node_seq))
+# rf_learners1
+# 
+# mtry_seq6 <-  floor(sqrt(6) * c(0.5, 1))
+# min_node_seq <- c(10,20,50)
+# rf_learners6 = create.Learner("SL.ranger", tune = list(mtry = mtry_seq6, min.node.size = min_node_seq))
+# rf_learners6
+# 
+# 
+# #Nnet (single layer neural nets)
+# size_seq <- c(1,2,5)
+# nnet_learners <- create.Learner("SL.nnet",tune = list(size = size_seq))
+# 
+# #SVM (Support vector machine)
+# nu_seq <- c(1)
+# type_seq <- c("C-classification")
+# svm_learners = create.Learner("SL.svm",tune = list(type.class = type_seq))
+# 
+# #KernelKnn
+# K_seq <- c(5,10,20)
+# h_seq <- c(0.01,0.05,0.1,0.25)
+# KernelKnn_learners <- create.Learner("SL.kernelKnn",tune = list(k = K_seq, h = h_seq))
+# 
+# 
+# 
+# 
+# start_time <- proc.time()
+# 
+# survEP_check <- survEP_learner(data = ACTG175_data,
+#                                id = "pidnum",
+#                                time = "days",
+#                                outcome = "cens",
+#                                censor = "censor_ind",
+#                                exposure = "treat",
+#                                time_cuts = seq(from=200,to=1100,by=100),
+#                                splits = 1,
+#                                e_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                                e_method = "Parametric",
+#                                e_SL_lib = e_lib,
+#                                out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                                out_method = "Parametric",
+#                                out_SL_lib = event.SL.library,
+#                                g_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                                g_method = "Parametric",
+#                                g_SL_lib = event.SL.library,
+#                                iso_reg = FALSE,
+#                                pse_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                                pse_approach = "Pooled",
+#                                pse_method = "Random forest",
+#                                pse_SL_lib = c("SL.mean",
+#                                               "SL.lm",
+#                                               "SL.glmnet_8", "SL.glmnet_9",
+#                                               "SL.glmnet_11", "SL.glmnet_12",
+#                                               "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
+#                                newdata = ACTG175_data,
+#                                target_option = "Lasso - Linear - Option 1",
+#                                CI = TRUE,
+#                                num_boot = 10)#,
+#                                # sieve_dim = 15,
+#                                # sieve_interaction = 2)
+# end_time <- proc.time()
+# end_time - start_time
 
 
 #Key end options
