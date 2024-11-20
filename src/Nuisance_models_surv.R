@@ -45,7 +45,8 @@ nuis_mod_surv <- function(model,
                           pred_data_long_all,
                           evt_times_uni,
                           SL_lib,
-                          learner = NA
+                          learner = NA,
+                          CI_tuned_params
 ){
   
   #------------------------------#
@@ -78,7 +79,7 @@ nuis_mod_surv <- function(model,
         covs_train <- train_data[,covariates]
         covs_test <- pred_data_long_all[,covariates]
       }
-      else if (model == "Pseudo outcome - Pooled logistic"){
+      else if (model == "Pseudo outcome - Pooled" | model == "Pseudo outcome - Pooled - CI"){
         data <- data %>% mutate(pse_Y_cond = pse_Y - lag(pse_Y, default = 0))
         data <- subset(data,select=-c(pse_Y))
         data <- data %>% group_by(ID) %>% 
@@ -179,9 +180,9 @@ nuis_mod_surv <- function(model,
     }
   }
 
-  if (model == "Pseudo outcome - Pooled logistic"){
+  if (model == "Pseudo outcome - Pooled"){
     if (method == "Random forest"){
-      train_data$time <- as.factor(train_data$time)
+      train_data$time <- as.numeric(train_data$time)
       X <- as.matrix(subset(train_data, select = c(covariates,"time")))
       mod <- regression_forest(X, train_data$pse_Y_cond)
     }
@@ -196,6 +197,33 @@ nuis_mod_surv <- function(model,
                           family = gaussian(),
                           cvControl = list(V = 10, stratifyCV=FALSE),
                           SL.library = SL_lib)
+    }
+  }
+  
+  if (model == "Pseudo outcome - Pooled - CI"){
+    if (method == "Random forest"){
+      #Defining tuning parameter values
+      tuned_sample.fraction <- CI_tuned_params$sample.fraction
+      tuned_mtry <- CI_tuned_params$mtry
+      tuned_min.node.size <- CI_tuned_params$min.node.size
+      tuned_honesty.fraction <- CI_tuned_params$honesty.fraction
+      tuned_honesty.prune.leaves <- CI_tuned_params$honesty.prune.leaves
+      tuned_alpha <- CI_tuned_params$alpha
+      tuned_imbalance.penalty <- CI_tuned_params$imbalance.penalty
+
+      train_data$time <- as.numeric(train_data$time)
+      X <- as.matrix(subset(train_data, select = c(covariates,"time")))
+      mod <- regression_forest(X, train_data$pse_Y_cond,
+                               sample.fraction = tuned_sample.fraction,
+                               mtry = tuned_mtry,
+                               min.node.size = tuned_min.node.size,
+                               honesty.fraction = tuned_honesty.fraction,
+                               honesty.prune.leaves = tuned_honesty.prune.leaves,
+                               alpha = tuned_alpha,
+                               imbalance.penalty = tuned_imbalance.penalty)
+    }
+    else if (method == "Super learner"){
+      #Could be added
     }
   }
 
@@ -536,7 +564,7 @@ nuis_mod_surv <- function(model,
     }
   }
 
-  if (model == "Pseudo outcome - Pooled logistic"){
+  if (model == "Pseudo outcome - Pooled" | model == "Pseudo outcome - Pooled - CI"){
     pred_data_long_all <- pred_data_long_all[order(pred_data_long_all$ID,pred_data_long_all$time),]
     pred_data <- subset(pred_data_long_all, select = c(covariates,"time"))
     pred_data$time <- as.factor(pred_data$time)
@@ -545,6 +573,7 @@ nuis_mod_surv <- function(model,
       pred_data_long_all$pred_cond <- predict(mod, pred_data, type = "response")
     }
     else if (method == "Random forest"){
+      pred_data$time <- as.numeric(pred_data$time)
       pred_data_matrix <- as.matrix(pred_data)
       pred_data_long_all$pred_cond <- predict(mod, pred_data_matrix)$predictions
     }
@@ -623,9 +652,12 @@ nuis_mod_surv <- function(model,
     output <- list(G_k_pred_long_all = pred_data_long_all,
                    G_mod = mod)
   }
-  else if (model == "Pseudo outcome - Pooled logistic"){
+  else if (model == "Pseudo outcome - Pooled"){
     output <- list(po_mod = mod,
                    pred = pred_data_long_all)
+  }
+  else if (model == "Pseudo outcome - Pooled - CI"){
+    output <- list(pred = pred_data_long_all$pred)
   }
 
   return(output)
