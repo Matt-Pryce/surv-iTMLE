@@ -47,11 +47,13 @@ data_manage_surv <- function(data,
                              outcome,
                              censor,
                              exposure,
+                             truncation = NULL,
                              time_cuts,
                              splits,
                              out_covariates,
                              e_covariates,
                              g_covariates,
+                             h_covariates,
                              pse_covariates,
                              newdata
 ){
@@ -61,11 +63,22 @@ data_manage_surv <- function(data,
   #---------------------------------------------#
   tryCatch( 
     {
+      #Checking if data is left truncated
+      if(is.null(truncation) == 0){
+        LT_data <- 1
+      }
+      else {
+        LT_data <- 0
+      }
+      
       vars <- c(id, time, outcome, censor, exposure)
+      if (LT_data == 1){
+        vars <- append(vars,truncation)
+      }
       
       #For all analysis choices and both learners
       if (learner != "CSF"){
-        vars <- append(vars,out_covariates)  
+        vars <- append(vars,out_covariates)
       }
       if (learner == "survEP-learner" | learner == "M-learner"){     #Add others if functions when coding other functions
         vars <- append(vars,e_covariates)
@@ -75,6 +88,9 @@ data_manage_surv <- function(data,
       if (learner == "CSF"){
         vars <- append(vars,e_covariates)
         vars <- append(vars,pse_covariates)
+      }
+      if (learner == "survEP-learner" & LT_data == 1){
+        vars <- append(vars,h_covariates)
       }
 
       vars <- vars[!duplicated(vars)]
@@ -97,6 +113,9 @@ data_manage_surv <- function(data,
       names(data)[names(data) == exposure] <- "A"
       names(data)[names(data) == outcome] <- "Y"
       names(data)[names(data) == censor] <- "C"
+      if (LT_data == 1){
+        names(data)[names(data) == truncation] <- "Q"
+      }
     },
     error=function(e) {
       stop('An error occured when renaming variables')
@@ -161,11 +180,20 @@ data_manage_surv <- function(data,
 
   if (is.null(time_cuts) == 1){
     #Defining at risk indicators for this dataset
-    data_long_all <- data_long_all %>% mutate(at_risk = case_when(
-      time2 >= time ~ 1,
-      time2 <  time ~ 0
-    ))
-
+    if (LT_data == 1){
+      data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+        Q>tstart           ~ as.numeric(NA),
+        time2 >= time ~ 1,
+        time2 <  time ~ 0
+      ))
+    }
+    else {
+      data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+        time2 >= time ~ 1,
+        time2 <  time ~ 0
+      ))
+    }
+    
     data_long_all <- data_long_all %>% mutate(Y2 = case_when(
       time2==time & Y == 1 ~ 1,
       time2==time & Y == 0 ~ 0,
@@ -175,12 +203,24 @@ data_manage_surv <- function(data,
   }
   else {
     #Defining indicator for outcome occurring in that interval
-    data_long_all <- data_long_all %>% mutate(Y2 = case_when(
-      time2<=time & time2>tstart & Y == 1 ~ 1,
-      time2<=time & time2>tstart & Y == 0 ~ 0,
-      time2>time          ~ 0,
-      time2<time          ~ as.numeric(NA)
-    ))
+    if (LT_data == 1){
+      data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+        Q>tstart           ~ as.numeric(NA),
+        Q<tstart & time2<=time & time2>tstart & Y == 1 ~ 1,
+        Q<tstart & time2<=time & time2>tstart & Y == 0 ~ 0,
+        Q<tstart & time2>time          ~ 0,
+        Q<tstart & time2<time          ~ as.numeric(NA)
+      ))
+    }
+    else {
+      data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+        time2<=time & time2>tstart & Y == 1 ~ 1,
+        time2<=time & time2>tstart & Y == 0 ~ 0,
+        time2>time          ~ 0,
+        time2<time          ~ as.numeric(NA)
+      ))
+    }
+   
     #Defining at risk indicators for this dataset
     data_long_all <- data_long_all %>% mutate(at_risk = case_when(
       is.na(Y2) == 1 ~ 0,
@@ -227,34 +267,34 @@ data_manage_surv <- function(data,
       # Combine all dataframes into one
       newdata_long_all <- do.call(rbind, newdata_long_list)
 
-      if (is.null(time_cuts) == 1){
-        #Defining at risk indicators for this dataset
-        data_long_all <- data_long_all %>% mutate(at_risk = case_when(
-          time2 >= time ~ 1,
-          time2 <  time ~ 0
-        ))
-
-        data_long_all <- data_long_all %>% mutate(Y2 = case_when(
-          time2==time & Y == 1 ~ 1,
-          time2==time & Y == 0 ~ 0,
-          time2>time          ~ 0,
-          time2<time          ~ as.numeric(NA)
-        ))
-      }
-      else {
-        #Defining indicator for outcome occurring in that interval
-        data_long_all <- data_long_all %>% mutate(Y2 = case_when(
-          time2<=time & time2>tstart & Y == 1 ~ 1,
-          time2<=time & time2>tstart & Y == 0 ~ 0,
-          time2>time          ~ 0,
-          time2<time          ~ as.numeric(NA)
-        ))
-        #Defining at risk indicators for this dataset
-        data_long_all <- data_long_all %>% mutate(at_risk = case_when(
-          is.na(Y2) == 1 ~ 0,
-          is.na(Y2) == 0 ~ 1
-        ))
-      }
+      # if (is.null(time_cuts) == 1){
+      #   #Defining at risk indicators for this dataset
+      #   data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+      #     time2 >= time ~ 1,
+      #     time2 <  time ~ 0
+      #   ))
+      # 
+      #   data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+      #     time2==time & Y == 1 ~ 1,
+      #     time2==time & Y == 0 ~ 0,
+      #     time2>time          ~ 0,
+      #     time2<time          ~ as.numeric(NA)
+      #   ))
+      # }
+      # else {
+      #   #Defining indicator for outcome occurring in that interval
+      #   data_long_all <- data_long_all %>% mutate(Y2 = case_when(
+      #     time2<=time & time2>tstart & Y == 1 ~ 1,
+      #     time2<=time & time2>tstart & Y == 0 ~ 0,
+      #     time2>time          ~ 0,
+      #     time2<time          ~ as.numeric(NA)
+      #   ))
+      #   #Defining at risk indicators for this dataset
+      #   data_long_all <- data_long_all %>% mutate(at_risk = case_when(
+      #     is.na(Y2) == 1 ~ 0,
+      #     is.na(Y2) == 0 ~ 1
+      #   ))
+      # }
 
       if (learner == "survEP-learner" | learner == "M-learner"){
         new_data_vars <- c("ID",pse_covariates,"time")
@@ -289,9 +329,16 @@ data_manage_surv <- function(data,
       if (as.numeric(all(data$C %in% 0:1)) == 0){
         stop("Censoring indicator must be binary")
       }
+      
+      if (LT_data == 1){
+        #Checking if observed time is after truncation time
+        if (sum((data$Y < data$Q)) == 0){
+          stop("Truncation times must be smaller or equal to event/censoring times")
+        }
+      }
     },
     error=function(e) {
-      stop('The exposure, outcome indicator or censoring indicator are non-binary')
+      stop('Either the exposure indicator is non-binary, the outcome indicator is non-binary, the censoring indicator is non-binary or the truncation times are larger than the event/censoring times')
       print(e)
     }
   )
@@ -306,7 +353,8 @@ data_manage_surv <- function(data,
                      evt_times_uni=evt_times_uni,
                      evt_times_uni0=evt_times_uni0,
                      newdata=newdata,
-                     newdata_long_all=newdata_long_all)
+                     newdata_long_all=newdata_long_all,
+                     LT_data=LT_data)
     }
     else {
       output <- list(data=data,
@@ -314,7 +362,8 @@ data_manage_surv <- function(data,
                      evt_times_uni=time_cuts,
                      evt_times_uni0=time_cuts0,
                      newdata=newdata,
-                     newdata_long_all=newdata_long_all)
+                     newdata_long_all=newdata_long_all,
+                     LT_data=LT_data)
     }
   }
   return(output)
