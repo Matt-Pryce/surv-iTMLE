@@ -46,8 +46,14 @@ nuis_mod_surv <- function(model,
                           evt_times_uni,
                           SL_lib,
                           learner = NA,
-                          CI_tuned_params
+                          CI_tuned_params,
+                          LT = NULL
 ){
+  
+  #Allowing models which do not account for left truncation to continue to run 
+  if (is.null(LT) == 1){
+    LT <- 0
+  }
   
   #------------------------------#
   #--- Creating training data ---#
@@ -55,8 +61,7 @@ nuis_mod_surv <- function(model,
   
   tryCatch(
     {
-      if (model == "Outcome"){
-
+      if (model == "Outcome" & LT == 0){
         train_data0 <- subset(data,data$A==0)
         train_data1 <- subset(data,data$A==1)
         train_data0 <- subset(train_data0,select = c("ID","time","Y",covariates))
@@ -70,12 +75,37 @@ nuis_mod_surv <- function(model,
           group_by(ID)
         
         covs_test <- pred_data_long_all[,covariates]
-      } 
+      }
+      else if (model == "Outcome" & LT == 1){
+        train_data0 <- subset(data,data$A==0)
+        train_data1 <- subset(data,data$A==1)
+        train_data0 <- subset(train_data0,select = c("ID","time","Y",covariates))        #Add in when sorting nuisance functions  ,"Q"
+        train_data1 <- subset(train_data1,select = c("ID","time","Y",covariates))        #Add in when sorting nuisance functions  ,"Q"
+        
+        covs_train0 <- train_data0[,covariates]
+        covs_train1 <- train_data1[,covariates]
+        
+        pred_data_long_all <- pred_data_long_all %>%
+          arrange(ID, tstart) %>%
+          group_by(ID)
+        
+        covs_test <- pred_data_long_all[,covariates]
+      }
       else if (model == "Propensity score"){
         train_data <- as.data.frame(subset(data,select = c(covariates,"A","s")))
       }
-      else if (model == "Censoring"){
+      else if (model == "Censoring" & LT == 0){
         train_data <- as.data.frame(subset(data,select = c("time","C",covariates,"A")))
+        covs_train <- train_data[,covariates]
+        covs_test <- pred_data_long_all[,covariates]
+      }
+      else if (model == "Censoring" & LT == 1){
+        train_data <- as.data.frame(subset(data,select = c("time","C",covariates,"A")))    #Add in when sorting nuisance functions  ,"Q"
+        covs_train <- train_data[,covariates]
+        covs_test <- pred_data_long_all[,covariates]
+      }
+      else if (model == "Truncation"){
+        train_data <- as.data.frame(subset(data,select = c("time","Q",covariates,"A")))    #Add in when sorting nuisance functions  ,"Q"
         covs_train <- train_data[,covariates]
         covs_test <- pred_data_long_all[,covariates]
       }
@@ -99,7 +129,7 @@ nuis_mod_surv <- function(model,
   #--- Running models ---#
   #----------------------#
 
-  if (model == "Outcome"){
+  if (model == "Outcome" & LT == 0){
     tryCatch(
       {
         if (method == "Parametric"){
@@ -138,8 +168,35 @@ nuis_mod_surv <- function(model,
       }
     )
   }
+  
+  if (model == "Outcome" & LT == 1){
+    tryCatch(
+      {
+        if (method == "Parametric"){   #Are there parametric options? - For now just allow normal model to run 
+          #Running first outcome models
+          mod_0 <- coxph(Surv(time, Y) ~ ., data = train_data0)
+          mod_1 <- coxph(Surv(time, Y) ~ ., data = train_data1)
+        }
+        if (method == "Super learner"){    #This may refer to Wolock option 
+          # # set.seed(1)  may need to set seed
+          # mod_0 <- survSuperLearner(time = train_data0$time, event = train_data0$Y, X = covs_train0, new.times = 10,
+          #                           event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+          #                           cvControl=list(V = 5),
+          #                           control=list(saveFitLibrary = TRUE))
+          # mod_1 <- survSuperLearner(time = train_data1$time, event = train_data1$Y, X = covs_train1, new.times = 10,
+          #                           event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+          #                           cvControl=list(V = 5),
+          #                           control=list(saveFitLibrary = TRUE))
+        }
+      },
+      error=function(e) {
+        stop('An error occured when running outcome models')
+        print(e)
+      }
+    )
+  }
 
-  if (model == "Censoring"){
+  if (model == "Censoring" & LT == 0){
     tryCatch(
       {
         if (method == "Parametric"){
@@ -151,6 +208,50 @@ nuis_mod_surv <- function(model,
                                     event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
                                     cvControl=list(V = 5),
                                     control=list(saveFitLibrary = TRUE))
+        }
+      },
+      error=function(e) {
+        stop('An error occured when running censoring model')
+        print(e)
+      }
+    )
+  }
+  
+  if (model == "Censoring" & LT == 1){      #For now just allow normal model to run, update once outcome models updated
+    tryCatch(
+      {
+        if (method == "Parametric"){
+          #Running first outcome models
+          mod <- coxph(Surv(time, C) ~ ., data = train_data)
+        }
+        else if (method == "Super learner"){
+          # mod <- survSuperLearner(time = train_data$time, event = train_data$C, X = covs_train, new.times = 10,
+          #                         event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+          #                         cvControl=list(V = 5),
+          #                         control=list(saveFitLibrary = TRUE))
+        }
+      },
+      error=function(e) {
+        stop('An error occured when running censoring model')
+        print(e)
+      }
+    )
+  }
+  
+  if (model == "Truncation"){ 
+    tryCatch(
+      {
+        if (method == "Parametric"){     #Estimates probabily of Q greater than 1 (need to take 1-pred)
+          #Running first outcome models
+          train_data$Q_ind <- 1
+          mod <- coxph(Surv(Q, Q_ind) ~ ., data = train_data)
+        }
+        else if (method == "Super learner"){   #Update once other done
+          # train_data$Q_ind <- 1   #Defining this as 1 for everyone as everyone has a trucation time
+          # mod <- survSuperLearner(time = train_data$Q, event = train_data$Q_ind, X = covs_train, new.times = 10,
+          #                         event.SL.library = SL_lib, cens.SL.library = SL_lib, verbose = TRUE,
+          #                         cvControl=list(V = 5),
+          #                         control=list(saveFitLibrary = TRUE))
         }
       },
       error=function(e) {
@@ -199,7 +300,7 @@ nuis_mod_surv <- function(model,
                           SL.library = SL_lib)
     }
   }
-  
+
   if (model == "Pseudo outcome - Pooled - CI"){
     if (method == "Random forest"){
       #Defining tuning parameter values
@@ -232,7 +333,7 @@ nuis_mod_surv <- function(model,
   #--- Obtaining model predictions ---#
   #-----------------------------------#
 
-  if (model == "Outcome"){
+  if (model == "Outcome" & LT == 0){
     tryCatch(
       {
         #--- Obtaining preds from outcome models ---#
@@ -471,8 +572,76 @@ nuis_mod_surv <- function(model,
       }
     )
   }
+  
+  
+  if (model == "Outcome" & LT == 1){      #Will also need updating once options added, for now just have parametric normal
+    tryCatch(
+      {
+        #--- Obtaining preds from outcome models ---#
+        if (method == "Parametric"){
+          #Survival estimates at the time point (Training and all data points)
+          S_k_pred_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="survival")
+          S_k_pred_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="survival")
 
-  if (model == "Censoring"){
+          if (learner == "survEP-learner" | learner == "M-learner"){
+            #Hazard estimates at the time point (All time point data)
+            pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, tstart) %>%
+              group_by(ID) %>%
+              mutate(h_k_long_all_0 = c(H_k_long_all_0[1], diff(H_k_long_all_0)))
+
+            H_k_pred_long_all_0 <- pred_data_long_all$H_k_long_all_0
+            h_k_pred_long_all_0 <- pred_data_long_all$h_k_long_all_0
+
+            pred_data_long_all$H_k_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="expected")
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, tstart) %>%
+              group_by(ID) %>%
+              mutate(h_k_long_all_1 = c(H_k_long_all_1[1], diff(H_k_long_all_1)))
+
+            H_k_pred_long_all_1 <- pred_data_long_all$H_k_long_all_1
+            h_k_pred_long_all_1 <- pred_data_long_all$h_k_long_all_1
+
+
+            #Survival predictions for time point of interest
+            temp_data_list <- vector("list", length(evt_times_uni))
+            for (t in seq_along(evt_times_uni)){
+              temp_data <- pred_data_long_all
+              temp_data$time2 <- temp_data$time      #Need time to be set to a number but don't want to lose original value
+              temp_data$time <- evt_times_uni[t]
+
+              temp_data_list[[t]] <- temp_data
+            }
+
+            S_t_pred_long_all_0_list <- lapply(temp_data_list, function(x){predict(mod_0,newdata=x,type="survival")})
+            S_t_pred_long_all_1_list <- lapply(temp_data_list, function(x){predict(mod_1,newdata=x,type="survival")})
+
+            for (t in seq_along(evt_times_uni)){
+              temp_data <- temp_data_list[[t]]
+              temp_data$S_t_pred_long_all_0 <- S_t_pred_long_all_0_list[[t]]
+              temp_data$S_t_pred_long_all_1 <- S_t_pred_long_all_1_list[[t]]
+              temp_data$time <- temp_data$time2       #Reassigning original value
+
+              temp_data <- temp_data %>% mutate(S_t_pred_long_all_a = case_when(
+                A == 1 ~ S_t_pred_long_all_1,
+                A == 0 ~ S_t_pred_long_all_0
+              ))
+
+              temp_data_list[[t]] <- temp_data
+            }
+          }
+        }
+      },
+      #if an error occurs, tell me the error
+      error=function(e) {
+        stop('An error occured when drawning predictions from outcome models')
+        print(e)
+      }
+    )
+  }
+
+  if (model == "Censoring" & LT == 0){
     tryCatch(
       {
         #--- Obtaining preds from censoring model ---#
@@ -551,6 +720,43 @@ nuis_mod_surv <- function(model,
       }
     )
   }
+  
+  if (model == "Censoring" & LT == 1){    #Update once outcomes updated
+    tryCatch(
+      {
+        #--- Obtaining preds from censoring model ---#
+        if (method == "Parametric"){
+          #Censoring estimates (Training and all data points)
+          G_k_pred_long_all <- predict(mod,newdata=pred_data_long_all,type="survival")
+        }
+      },
+      #if an error occurs, tell me the error
+      error=function(e) {
+        stop('An error occured when drawning predictions from outcome models')
+        print(e)
+      }
+    )
+  }
+  
+  if (model == "Truncation"){    #Update once outcomes updated
+    tryCatch(
+      {
+        #--- Obtaining preds from censoring model ---#
+        if (method == "Parametric"){
+          #Truncation estimates (Training and all data points)
+          pred_data_long_all$Q_ind <- 1
+          pred_data_long_all$Q <- pred_data_long_all$time
+          trunc_temp_k_pred_long_all <- predict(mod,newdata=pred_data_long_all,type="survival")
+          trunc_k_pred_long_all <- 1 - trunc_temp_k_pred_long_all
+        }
+      },
+      #if an error occurs, tell me the error
+      error=function(e) {
+        stop('An error occured when drawning predictions from outcome models')
+        print(e)
+      }
+    )
+  }
 
   if (model == "Propensity score"){
     if (method == "Random forest"){
@@ -609,7 +815,7 @@ nuis_mod_surv <- function(model,
 
 
   #-----------------------------#
-  #--- Returning information ---#
+  #--- Returning information ---#    #Make sure LT output aligns or gets specified 
   #-----------------------------#
 
   if (model == "Outcome" & method == "Super learner"  & (learner == "survEP-learner" | learner == "M-learner")){
@@ -651,6 +857,10 @@ nuis_mod_surv <- function(model,
   else if (model == "Censoring" & method == "Super learner"){
     output <- list(G_k_pred_long_all = pred_data_long_all,
                    G_mod = mod)
+  }
+  else if (model == "Truncation"){
+    output <- list(trunc_k_pred_long_all = trunc_k_pred_long_all,
+                   trunc_mod = mod)
   }
   else if (model == "Pseudo outcome - Pooled"){
     output <- list(po_mod = mod,
