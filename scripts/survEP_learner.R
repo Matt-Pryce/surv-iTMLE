@@ -30,6 +30,7 @@ library(riskRegression)
 library(pec)
 library(timeROC)
 library(survSuperLearner)
+library(survML)
 
 #######################################
 #--- For single time point setting ---#
@@ -176,12 +177,21 @@ survEP_learner <- function(data,
         po_e_data_long_all <- subset(po_e_data_long_all, po_e_data_long_all$s == i)
         po_e_data_long_all <- subset(po_e_data_long_all, select = c(e_covariates))
 
-        po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","tstart","time",out_covariates,"s","at_risk"))
-        po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
+        if (clean_data$LT_data == 0){ 
+          po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","tstart","time",out_covariates,"s","at_risk"))
+          po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
+          
+          po_g_data_long_all <- subset(analysis_data_long_all, select = c("ID","C","tstart","time",g_covariates,"A","s"))
+          po_g_data_long_all <- subset(po_g_data_long_all, po_g_data_long_all$s == i)
+        }
+        else {
+          po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","Q","tstart","time",out_covariates,"s","at_risk"))
+          po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
+          
+          po_g_data_long_all <- subset(analysis_data_long_all, select = c("ID","C","Q","tstart","time",g_covariates,"A","s"))
+          po_g_data_long_all <- subset(po_g_data_long_all, po_g_data_long_all$s == i)
+        }
 
-        po_g_data_long_all <- subset(analysis_data_long_all, select = c("ID","C","tstart","time",g_covariates,"A","s"))
-        po_g_data_long_all <- subset(po_g_data_long_all, po_g_data_long_all$s == i)
-        
         if (clean_data$LT_data == 1){
           po_h_data_long_all <- subset(analysis_data_long_all, select = c("ID","Q","tstart","time",h_covariates,"A","s"))
           po_h_data_long_all <- subset(po_h_data_long_all, po_h_data_long_all$s == i)
@@ -193,9 +203,6 @@ survEP_learner <- function(data,
           po_data_long_all <- subset(analysis_data_long_all,select = c("ID","Y2","C","A","tstart","time",pse_covariates,"s","at_risk"))
           po_data_long_all <- subset(po_data_long_all,po_data_long_all$s == i)
         }
-
-
-
       },
       #if an error occurs, tell me the error
       error=function(e) {
@@ -301,7 +308,7 @@ survEP_learner <- function(data,
         print(e)
       }
     )
-    
+
     #Truncation function
     if (clean_data$LT_data == 1){
       tryCatch(
@@ -314,9 +321,9 @@ survEP_learner <- function(data,
                                        SL_lib = h_SL_lib,
                                        pred_data_long_all = po_h_data_long_all,
                                        LT = clean_data$LT_data)
-          
+
           if (h_method == "Super learner"){
-            # po_data_long_all$G_k_pred <- censoring_model$G_k_pred_long_all$G_k_pred
+            po_data_long_all$trunc_k_pred <- trunc_model$trunc_k_pred_long_all$pred
           }
           else if (h_method == "Parametric"){
             po_data_long_all$trunc_k_pred <- trunc_model$trunc_k_pred_long_all
@@ -327,7 +334,7 @@ survEP_learner <- function(data,
           stop(paste("An error occured in truncation model function in split ",i,sep=""))
           print(e)
         }
-      ) 
+      )
     }
 
     #--- Collecting long datasets ---#
@@ -484,12 +491,12 @@ survEP_learner <- function(data,
           ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
           (1/targeting_data$G_k_pred) *
           (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
-        
+
         targeting_data$H_1 <- targeting_data$at_risk *
           (targeting_data$A/targeting_data$e_pred) *
           (1/targeting_data$G_k_pred) *
           (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
-        
+
         targeting_data$H_a <- targeting_data$at_risk *
           ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
           (1/targeting_data$G_k_pred) *
@@ -501,20 +508,20 @@ survEP_learner <- function(data,
           (1/targeting_data$G_k_pred) *
           (1/targeting_data$trunc_k_pred) *
           (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
-        
+
         targeting_data$H_1 <- targeting_data$at_risk *
           (targeting_data$A/targeting_data$e_pred) *
           (1/targeting_data$G_k_pred) *
           (1/targeting_data$trunc_k_pred) *
           (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
-        
+
         targeting_data$H_a <- targeting_data$at_risk *
           ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
           (1/targeting_data$G_k_pred) *
           (1/targeting_data$trunc_k_pred) *
           (targeting_data$S_t_pred_a/targeting_data$S_k_pred_a)
       }
-      
+
 
       #Sieve basis covariate names
       num_covs_pre <- ncol(targeting_data)  #For creating list of cov names
@@ -538,38 +545,38 @@ survEP_learner <- function(data,
 
           #Restricting to those at risk
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
-          
+
           #Check if data is empty
           if (dim(training_data_at_risk)[1] != 0 & t_step == 1){
             #If iteration 1, run lasso model
             #Setting up lasso model
             lasso_mod_covs <- sieve_names
             X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-            
+
             #Running lasso model
             lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                    intercept = FALSE,
                                    alpha = 1,
                                    offset = training_data_at_risk$h_k_pred_a,
                                    weights = training_data_at_risk$H_a)
-            
+
             # Choose a lambda value
             lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-            
+
             # Extract coefficients at the chosen lambda
             coef_matrix <- coef(lasso_mod, s = lambda_value)
-            
+
             # Get the indices of non-zero coefficients
             nonzero_indices <- which(coef_matrix != 0)
-            
+
             # Extract the names of non-zero coefficients (excluding the intercept)
             nonzero_covariates <- rownames(coef_matrix)[nonzero_indices]
             nonzero_covariates <- nonzero_covariates[nonzero_covariates != "(Intercept)"]  # Remove intercept
-            
+
             #Adding to list
             lasso_cov_list[[tp]] <- nonzero_covariates
           }
-      
+
           linear_mod_covs <- lasso_cov_list[[tp]]
 
           #Adding in check to see if no covariates were specified
@@ -722,31 +729,31 @@ survEP_learner <- function(data,
           training_data_at_risk <- subset(training_data,training_data$at_risk == 1)
 
           if (dim(training_data_at_risk)[1] != 0){
-            
+
             #Setting up lasso model
             lasso_mod_covs <- sieve_names
             X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-            
+
             #Running lasso model
             lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                    intercept = FALSE,
                                    alpha = 1,
                                    offset = training_data_at_risk$h_k_pred_a,
                                    weights = training_data_at_risk$H_a)
-            
+
             # Choose a lambda value
             lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-            
+
             # Extract coefficients at the chosen lambda
             coef_matrix <- coef(lasso_mod, s = lambda_value)
-            
+
             # Get the indices of non-zero coefficients
             nonzero_indices <- which(coef_matrix != 0)
-            
+
             # Extract the names of non-zero coefficients (excluding the intercept)
             nonzero_covariates <- rownames(coef_matrix)[nonzero_indices]
             nonzero_covariates <- nonzero_covariates[nonzero_covariates != "(Intercept)"]  # Remove intercept
-            
+
             #Setting up linear regression model
             linear_mod_covs <- nonzero_covariates
             cov_list <- append(cov_list,linear_mod_covs)
@@ -906,31 +913,31 @@ survEP_learner <- function(data,
             #Setting up lasso model
             lasso_mod_covs <- sieve_names
             X <- as.matrix(subset(training_data_at_risk,select = lasso_mod_covs))
-            
+
             #Running lasso model
             lasso_mod <- cv.glmnet(x = X,y = training_data_at_risk$Y2,
                                    intercept = FALSE,
                                    alpha = 1,
                                    offset = training_data_at_risk$h_k_pred_a,
                                    weights = training_data_at_risk$H_a)
-            
+
             # Choose a lambda value
             lambda_value <- lasso_mod$lambda.min  #Using the minimum lambda
-            
+
             # Extract coefficients at the chosen lambda
             coef_matrix <- coef(lasso_mod, s = lambda_value)
-            
+
             # Get the indices of non-zero coefficients
             nonzero_indices <- which(coef_matrix != 0)
             nonzero_covariates_val <- coef_matrix[nonzero_indices]
             nonzero_covariates_names <- rownames(coef_matrix)[nonzero_indices]
-            
+
             cov_list <- append(cov_list,nonzero_covariates_names)
           }
           else if (dim(training_data_at_risk)[1] == 0){
             nonzero_indices <- NULL
           }
-          
+
           if (length(nonzero_indices) != 0){
             #Creating dataset
             eps_data <- as.data.frame(matrix(nrow = 1, ncol=length(nonzero_indices)))
@@ -1248,9 +1255,21 @@ ACTG175_data <- ACTG175_data[1:800,]
 ACTG175_data$trunc <- round(runif(800,0,250))
 ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
 
-event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph"), function(alg) {
-  c(alg,"All")
-})
+LT <- 1
+
+if (LT==1){
+  event.SL.library <- c("SL.mean",
+                        "SL.glm")
+}
+if (LT == 0){
+  event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
+    c(alg,"All")
+  })
+}
+
+
+
+
 
 # event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
 #                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
@@ -1320,18 +1339,18 @@ survEP_check <- survEP_learner(data = ACTG175_data,
                                e_method = "Parametric",
                                e_SL_lib = e_lib,
                                out_covariates = c("age","wtkg","hemo","homo","drugs"),
-                               out_method = "Parametric",
+                               out_method = "Super learner",
                                out_SL_lib = event.SL.library,
                                g_covariates = c("age","wtkg","hemo","homo","drugs"),
-                               g_method = "Parametric",
+                               g_method = "Super learner",
                                g_SL_lib = event.SL.library,
                                h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               h_method = "Parametric",
+                               h_method = "Super learner",
                                h_SL_lib = event.SL.library,
                                iso_reg = FALSE,
                                pse_covariates = c("age","wtkg","hemo","homo","drugs"),
                                pse_approach = "Pooled",
-                               pse_method = "Super learner",
+                               pse_method = "Parametric",
                                pse_SL_lib = c("SL.mean",
                                               "SL.lm"),
                                               # "SL.glmnet_8", "SL.glmnet_9",
