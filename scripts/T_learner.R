@@ -49,6 +49,7 @@ T_learner <- function(data,
                       outcome,
                       censor,
                       exposure,
+                      truncation = NULL,
                       time_cuts = "N/A",
                       out_method = c("Parametric","Super learner"),
                       out_covariates,
@@ -56,7 +57,6 @@ T_learner <- function(data,
                       nuisance_estimates_input = 0,
                       o_0_pred = NA,
                       o_1_pred = NA,
-                      g_pred = NA,
                       newdata
 ){
   
@@ -71,6 +71,7 @@ T_learner <- function(data,
                                  outcome=outcome,
                                  censor=censor,
                                  exposure=exposure,
+                                 truncation=truncation,
                                  time_cuts=time_cuts,
                                  splits = 1,
                                  out_covariates = out_covariates,
@@ -94,7 +95,8 @@ T_learner <- function(data,
                                         pred_data_long_all = clean_data$newdata_long_all,
                                         evt_times_uni = clean_data$evt_times_uni,
                                         SL_lib = out_SL_lib,
-                                        learner = "T-learner")
+                                        learner = "T-learner",
+                                        LT = clean_data$LT_data)
 
         #Saving survival predictions
         pred_data <- clean_data$newdata_long_all
@@ -153,9 +155,23 @@ T_learner <- function(data,
 #---------------#
 load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
 
-#Defining censoring indicator
 ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+ACTG175_data <- ACTG175_data[1:800,]
+ACTG175_data$trunc <- round(runif(800,0,250))
+ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
 
+
+LT <- 0
+
+if (LT==1){
+  event.SL.library <- c("SL.mean",
+                        "SL.glm")
+}
+if (LT == 0){
+  event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
+    c(alg,"All")
+  })
+}
 
 start_time <- proc.time()
 
@@ -165,7 +181,8 @@ T_check <- T_learner(data = ACTG175_data,
                      outcome = "cens",
                      censor = "censor_ind",
                      exposure = "treat",
-                     time_cuts = seq(from=200,to=1200,by=10),
+                     # truncation = "trunc",
+                     time_cuts = seq(from=200,to=1100,by=100),
                      out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
                      out_method = "Super learner",
                      out_SL_lib = event.SL.library,
