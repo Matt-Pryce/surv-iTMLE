@@ -115,7 +115,7 @@ data_gen_surv <- function(n = 1000,
     evt_T <- runif(n,0,unif_end_T)
   }
 
-  
+
   if (is.null(LT)==1){
     if (C_type == "Cox"){
       #Cox needs to specify baseline hazard and combination
@@ -142,20 +142,22 @@ data_gen_surv <- function(n = 1000,
     if (C_type == "Unif"){
       C <- runif(n,0,unif_end_C)
     }
-    
-    #Determine observed times (minimum of survival and censoring times)
-    T_tilde <- pmin(T, C)
-    
-    if (is.null(right_cen) == 0){
-      T_tilde <- pmin(T_tilde,right_cen)
+
+    for (i in 1:n){
+      if (C[i]>right_cen){
+        C[i] <- right_cen
+      }
     }
-    
+
+    #Determine observed times (minimum of survival and censoring times)
+    T_tilde <- pmin(evt_T, C)
+
     # Indicator for censoring (1 if the event occurred, 0 if censored)
     delta <- as.numeric((evt_T <= C))
     cen_ind <- 1-delta
   }
   
-  if (LT == 1){
+  if (is.null(LT) == 0){
     #--- Generating truncation time Q ---#
     if (Q_type == "Cox"){
       #Cox needs to specify baseline hazard and combination
@@ -182,8 +184,8 @@ data_gen_surv <- function(n = 1000,
     if (Q_type == "Unif"){
       Q <- runif(n,0,unif_end_Q)
     }
-    
-    #Adding in max trunc option 
+
+    #Adding in max trunc option
     if (is.null(max_Q)==1){
       max_Q <- evt_T - 0.05
       Q <- pmin(Q,max_Q)
@@ -192,8 +194,8 @@ data_gen_surv <- function(n = 1000,
       Q <- pmin(Q,max_Q)
     }
     Q <- pmax(Q,0)
-    
-    
+
+
     #--- Generating censoring time C=Q+D ---#
     if (C_type == "Cox"){
       #Cox needs to specify baseline hazard and combination
@@ -220,35 +222,36 @@ data_gen_surv <- function(n = 1000,
     if (C_type == "Unif"){
       D <- runif(n,0,unif_end_C)
     }
-    
+
     C <- Q + D
     
+    for (i in 1:n){
+      if (C[i]>right_cen){
+        C[i] <- right_cen
+      }
+    }
+
     #--- Generating observed time ---#
     #Determine observed times (minimum of survival and censoring times)
     T_tilde <- pmin(evt_T, C)
-    
-    if (is.null(right_cen) == 0){
-      T_tilde <- pmin(T_tilde,right_cen)
-    }
-    
+
     # Indicator for censoring (1 if the event occurred, 0 if censored)
     delta <- as.numeric((evt_T <= C))
     cen_ind <- 1-delta
-    
   }
   
   #Collating dataset
-  if (is.null(LT)==1){
-    sim_data <- data.frame(X,prop_score,T,C,T_tilde,delta,cen_ind)
+  if (is.null(LT) == 1){
+    sim_data <- data.frame(X,prop_score,T=evt_T,C,T_tilde,delta,cen_ind)
   }
-  else if (LT == 1){
+  else if (is.null(LT) == 0){
     sim_data <- data.frame(X,prop_score,T=evt_T,Q,D,C,T_tilde,delta,cen_ind)
   }
   return(sim_data)
 }
 
 #####################################################################
-# 
+
 # e_func <- function(X){
 #   X2 <- X$X2;
 #   X3 <- X$X3;
@@ -266,8 +269,8 @@ data_gen_surv <- function(n = 1000,
 # aft_func <- function(X){
 #   X2 <- X$X2;
 #   X3 <- X$X3;
-#   epsilon <- rnorm(dim(X)[1])
-#   aft_test <- pmax(X2,X3) + epsilon
+#   # epsilon <- rnorm(dim(X)[1])
+#   aft_test <- pmax(X2,X3) #+ epsilon
 #   aft_test
 # }
 # 
@@ -305,7 +308,7 @@ data_gen_surv <- function(n = 1000,
 #                           H_0_lambda_Q = H_0_lambda,
 #                           H_0_gamma_Q = H_0_gamma,
 #                           # max_Q = 1,
-#                           C_type = "Unif",
+#                           C_type = "AFT",
 #                           cox_func_C = cox_func,
 #                           aft_func_C = aft_func,
 #                           pois_func_C = pois_func,
@@ -314,7 +317,7 @@ data_gen_surv <- function(n = 1000,
 #                           unif_end_C = 3,
 #                           right_cen = 5,
 #                           LT = 1)
-# 
+
 
 # #Finding truth 
 # 
