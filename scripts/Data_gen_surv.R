@@ -186,15 +186,9 @@ data_gen_surv <- function(n = 1000,
     }
 
     #Adding in max trunc option
-    if (is.null(max_Q)==1){
-      max_Q <- evt_T - 0.05
-      Q <- pmin(Q,max_Q)
-    }
     if (is.null(max_Q) == 0){
       Q <- pmin(Q,max_Q)
     }
-    Q <- pmax(Q,0)
-
 
     #--- Generating censoring time C=Q+D ---#
     if (C_type == "Cox"){
@@ -234,7 +228,8 @@ data_gen_surv <- function(n = 1000,
     #--- Generating observed time ---#
     #Determine observed times (minimum of survival and censoring times)
     T_tilde <- pmin(evt_T, C)
-
+    Observed <- as.numeric((T_tilde>=Q))
+    
     # Indicator for censoring (1 if the event occurred, 0 if censored)
     delta <- as.numeric((evt_T <= C))
     cen_ind <- 1-delta
@@ -245,7 +240,7 @@ data_gen_surv <- function(n = 1000,
     sim_data <- data.frame(X,prop_score,T=evt_T,C,T_tilde,delta,cen_ind)
   }
   else if (is.null(LT) == 0){
-    sim_data <- data.frame(X,prop_score,T=evt_T,Q,D,C,T_tilde,delta,cen_ind)
+    sim_data <- data.frame(X,prop_score,T=evt_T,Q,D,C,T_tilde,delta,cen_ind,Observed)
   }
   return(sim_data)
 }
@@ -307,7 +302,7 @@ data_gen_surv <- function(n = 1000,
 #                           unif_end_Q = 3,
 #                           H_0_lambda_Q = H_0_lambda,
 #                           H_0_gamma_Q = H_0_gamma,
-#                           # max_Q = 1,
+#                           max_Q = 0.3,
 #                           C_type = "AFT",
 #                           cox_func_C = cox_func,
 #                           aft_func_C = aft_func,
