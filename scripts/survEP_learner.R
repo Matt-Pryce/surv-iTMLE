@@ -131,7 +131,7 @@ survEP_learner <- function(data,
   analysis_data_long_all <- analysis_data_long_all %>%
     arrange(ID, tstart) %>%
     group_by(ID)
-  
+
   #-------------------------------#
   #--- Running nuisance models ---#
   #-------------------------------#
@@ -177,17 +177,17 @@ survEP_learner <- function(data,
         po_e_data_long_all <- subset(po_e_data_long_all, po_e_data_long_all$s == i)
         po_e_data_long_all <- subset(po_e_data_long_all, select = c(e_covariates))
 
-        if (clean_data$LT_data == 0){ 
+        if (clean_data$LT_data == 0){
           po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","tstart","time",out_covariates,"s","at_risk"))
           po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
-          
+
           po_g_data_long_all <- subset(analysis_data_long_all, select = c("ID","C","tstart","time",g_covariates,"A","s"))
           po_g_data_long_all <- subset(po_g_data_long_all, po_g_data_long_all$s == i)
         }
         else {
           po_o_data_long_all <- subset(analysis_data_long_all, select = c("ID","Y","A","C","Q","tstart","time",out_covariates,"s","at_risk"))
           po_o_data_long_all <- subset(po_o_data_long_all, po_o_data_long_all$s == i)
-          
+
           po_g_data_long_all <- subset(analysis_data_long_all, select = c("ID","C","Q","tstart","time",g_covariates,"A","s"))
           po_g_data_long_all <- subset(po_g_data_long_all, po_g_data_long_all$s == i)
         }
@@ -195,7 +195,7 @@ survEP_learner <- function(data,
         if (clean_data$LT_data == 1){
           po_h_data_long_all <- subset(analysis_data_long_all, select = c("ID","Q","tstart","time",h_covariates,"A","s"))
           po_h_data_long_all <- subset(po_h_data_long_all, po_h_data_long_all$s == i)
-          
+
           po_data_long_all <- subset(analysis_data_long_all,select = c("ID","Y2","C","A","Q","tstart","time",pse_covariates,"s","at_risk"))
           po_data_long_all <- subset(po_data_long_all,po_data_long_all$s == i)
         }
@@ -253,7 +253,7 @@ survEP_learner <- function(data,
           po_data_long_all$h_k_pred_0 <- outcome_models$h_k_pred_long_all_0
           po_data_long_all$h_k_pred_1 <- outcome_models$h_k_pred_long_all_1
         }
-        else if (out_method == "Super learner"){
+        else if (out_method == "Super learner" | out_method == "Survival stack"){
           po_data_long_all$S_k_pred_0 <- outcome_models$pred_data_long_all_pred$S_k_pred_0
           po_data_long_all$S_k_pred_1 <- outcome_models$pred_data_long_all_pred$S_k_pred_1
           po_data_long_all$H_k_pred_0 <- outcome_models$pred_data_long_all_pred$H_k_pred_0
@@ -295,7 +295,7 @@ survEP_learner <- function(data,
                                          pred_data_long_all = po_g_data_long_all,
                                          LT = clean_data$LT_data)
 
-        if (g_method == "Super learner"){
+        if (g_method == "Super learner" | g_method == "Survival stack"){
           po_data_long_all$G_k_pred <- censoring_model$G_k_pred_long_all$G_k_pred
         }
         else if (g_method == "Parametric"){
@@ -322,7 +322,7 @@ survEP_learner <- function(data,
                                        pred_data_long_all = po_h_data_long_all,
                                        LT = clean_data$LT_data)
 
-          if (h_method == "Super learner"){
+          if (h_method == "Survival stack"){
             po_data_long_all$trunc_k_pred <- trunc_model$trunc_k_pred_long_all$pred
           }
           else if (h_method == "Parametric"){
@@ -1255,7 +1255,7 @@ ACTG175_data <- ACTG175_data[1:800,]
 ACTG175_data$trunc <- round(runif(800,0,250))
 ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
 
-LT <- 1
+LT <- 0
 
 if (LT==1){
   event.SL.library <- c("SL.mean",
@@ -1265,6 +1265,8 @@ if (LT == 0){
   event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
     c(alg,"All")
   })
+  event.SL.library2 <- c("SL.mean",
+                         "SL.glm")
 }
 
 
@@ -1339,18 +1341,18 @@ survEP_check <- survEP_learner(data = ACTG175_data,
                                e_method = "Parametric",
                                e_SL_lib = e_lib,
                                out_covariates = c("age","wtkg","hemo","homo","drugs"),
-                               out_method = "Super learner",
-                               out_SL_lib = event.SL.library,
+                               out_method = "Survival stack",
+                               out_SL_lib = event.SL.library2,
                                g_covariates = c("age","wtkg","hemo","homo","drugs"),
-                               g_method = "Super learner",
-                               g_SL_lib = event.SL.library,
+                               g_method = "Survival stack",
+                               g_SL_lib = event.SL.library2,
                                h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                               h_method = "Super learner",
-                               h_SL_lib = event.SL.library,
+                               h_method = "Survival stack",
+                               h_SL_lib = event.SL.library2,
                                iso_reg = FALSE,
                                pse_covariates = c("age","wtkg","hemo","homo","drugs"),
                                pse_approach = "Pooled",
-                               pse_method = "Parametric",
+                               pse_method = "Super learner",
                                pse_SL_lib = c("SL.mean",
                                               "SL.lm"),
                                               # "SL.glmnet_8", "SL.glmnet_9",
