@@ -39,7 +39,7 @@ library(survival)
 
 nuis_mod_surv <- function(model,
                           data,
-                          method = c("Parametric","Random forest","Super learner"),
+                          method = c("Parametric","Random forest","Super learner","Survival Stack"),
                           covariates,
                           pred_data,
                           pred_data_long_all,
@@ -112,9 +112,11 @@ nuis_mod_surv <- function(model,
       else if (model == "Pseudo outcome - Pooled" | model == "Pseudo outcome - Pooled - CI"){
         data <- data %>% mutate(pse_Y_cond = pse_Y - lag(pse_Y, default = 0))
         data <- subset(data,select=-c(pse_Y))
-        data <- data %>% group_by(ID) %>% 
-          summarize(across(everything(), last),time=0,tstart=0,pse_Y_cond=0, .groups = "drop") %>%
-          bind_rows(data, .) %>% arrange(ID)
+        data_temp <- subset(data,data$tstart==0)
+        data_temp$time <-  0
+        data_temp$tstart <- 0
+        data_temp$pse_Y_cond <- 0
+        data <- rbind(data,data_temp)
         data <- data %>% arrange(ID, time) %>% group_by(ID)
         train_data <- as.data.frame(subset(data,select = c("pse_Y_cond","time",covariates)))
       }
@@ -148,6 +150,36 @@ nuis_mod_surv <- function(model,
                                     cvControl=list(V = 5),
                                     control=list(saveFitLibrary = TRUE))
         }
+        if (method == "Survival stack"){
+          pred_data <- pred_data_long_all[!duplicated(pred_data_long_all$ID), ]
+          test_X <- as.data.frame(pred_data[,c(covariates)])
+          train_X0 <- train_data0[,c(covariates)]
+          train_X1 <- train_data1[,c(covariates)]
+          
+          mod_0 <- survML::stackG(time = train_data0$time,
+                                  event = train_data0$Y,
+                                  X = train_X0,
+                                  newX = test_X,
+                                  newtimes = evt_times_uni,
+                                  bin_size = 0.025,
+                                  time_basis = "continuous",
+                                  time_grid_approx = sort(unique(train_data0$time)),
+                                  surv_form = "exp",
+                                  SL_control = list(SL.library = SL_lib,
+                                                    V = 5))
+          
+          mod_1 <- survML::stackG(time = train_data1$time,
+                                  event = train_data1$Y,
+                                  X = train_X1,
+                                  newX = test_X,
+                                  newtimes = evt_times_uni,
+                                  bin_size = 0.025,
+                                  time_basis = "continuous",
+                                  time_grid_approx = sort(unique(train_data1$time)),
+                                  surv_form = "exp",
+                                  SL_control = list(SL.library = SL_lib,
+                                                    V = 5))
+        }
       },
       error=function(e) {
         stop('An error occured when running outcome models')
@@ -164,7 +196,7 @@ nuis_mod_surv <- function(model,
           mod_0 <- coxph(Surv(time, Y) ~ ., data = train_data0)
           mod_1 <- coxph(Surv(time, Y) ~ ., data = train_data1)
         }
-        if (method == "Super learner"){   #GLobal survival stacking
+        if (method == "Survival stack"){
           pred_data <- pred_data_long_all[!duplicated(pred_data_long_all$ID), ]
           test_X <- as.data.frame(pred_data[,c(covariates)])
           train_X0 <- train_data0[,c(covariates)]
@@ -217,6 +249,23 @@ nuis_mod_surv <- function(model,
                                     cvControl=list(V = 5),
                                     control=list(saveFitLibrary = TRUE))
         }
+        else if (method == "Survival stack"){
+          pred_data <- pred_data_long_all[!duplicated(pred_data_long_all$ID), ]
+          test_X <- as.data.frame(pred_data[,c(covariates)])
+          train_X <- train_data[,c(covariates)]
+          
+          mod <- survML::stackG(time = train_data$time,
+                                event = train_data$C,
+                                X = train_X,
+                                newX = test_X,
+                                newtimes = evt_times_uni,
+                                bin_size = 0.025,
+                                time_basis = "continuous",
+                                time_grid_approx = sort(unique(train_data$time)),
+                                surv_form = "exp",
+                                SL_control = list(SL.library = SL_lib,
+                                                  V = 5))
+        }
       },
       error=function(e) {
         stop('An error occured when running censoring model')
@@ -232,7 +281,7 @@ nuis_mod_surv <- function(model,
           #Running first outcome models
           mod <- coxph(Surv(time, C) ~ ., data = train_data)
         }
-        else if (method == "Super learner"){
+        else if (method == "Survival stack"){
           pred_data <- pred_data_long_all[!duplicated(pred_data_long_all$ID), ]
           test_X <- as.data.frame(pred_data[,c(covariates)])
           train_X <- train_data[,c(covariates)]
@@ -266,7 +315,7 @@ nuis_mod_surv <- function(model,
           train_data$Q_ind <- 1     #Set event indicator to 1 as no one is censored
           mod <- coxph(Surv(Q, Q_ind) ~ ., data = train_data)
         }
-        else if (method == "Super learner"){   #Estimates probabily of Q or equal to t, but will output conditional probs 
+        else if (method == "Survival stack"){   #Estimates probabily of Q or equal to t, but will output conditional probs 
           #--- Manually implementing global survival stacking as it doesn't work when no censoring ---#
           evt_times_uni0 <- c(0,evt_times_uni)
           for (i in seq_along(evt_times_uni)){
@@ -547,6 +596,76 @@ nuis_mod_surv <- function(model,
           }
           pred_data_long_all <- subset(pred_data_long_all,select = keep_covs)
         }
+        if (method == "Survival stack"){
+          uni_time <- rep(evt_times_uni, times = nrow(pred_data))
+          
+          #Obtaining predictions from outcome models 
+          S_k_pred_wide_all_0 <- as.data.frame(mod_0$S_T_preds)
+          S_k_pred_wide_all_1 <- as.data.frame(mod_1$S_T_preds)
+          
+          #Making into long form
+          ncols_temp <- ncol(pred_data)
+          pred_data0 <- cbind(pred_data,S_k_pred_wide_all_0)
+          pred_data1 <- cbind(pred_data,S_k_pred_wide_all_1)
+
+          pred_data0 <- pred_data0 %>%
+            pivot_longer(
+              cols = starts_with("V"),
+              names_to = "time2",
+              values_to = "S_k_pred_0"
+            )
+          pred_data1 <- pred_data1 %>%
+            pivot_longer(
+              cols = starts_with("V"),
+              names_to = "time2",
+              values_to = "S_k_pred_1"
+            )
+          pred_data_long_all <- pred_data0
+          pred_data_long_all$S_k_pred_1 <- pred_data1$S_k_pred_1
+          pred_data_long_all$time <- uni_time
+          S_k_pred_long_all_0 <- pred_data_long_all$S_K_pred_0
+          S_k_pred_long_all_1 <- pred_data_long_all$S_K_pred_1
+
+          if (learner == "survEP-learner"){
+            #Calculating cumulative hazard estimates
+            pred_data_long_all$H_k_pred_0 <- -log(pred_data_long_all$S_k_pred_0)
+            pred_data_long_all$H_k_pred_1 <- -log(pred_data_long_all$S_k_pred_1)
+
+            #Calculating hazards at each time
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, time) %>%
+              group_by(ID) %>%
+              mutate(h_k_pred_0 = c(H_k_pred_0[1], diff(H_k_pred_0)))
+            pred_data_long_all <- pred_data_long_all %>%
+              arrange(ID, time) %>%
+              group_by(ID) %>%
+              mutate(h_k_pred_1 = c(H_k_pred_1[1], diff(H_k_pred_1)))
+
+            #Survival predictions for time point of interest
+            temp_data_list <- vector("list", length(evt_times_uni))
+            preds0 <- cbind(ID=pred_data$ID,S_k_pred_wide_all_0)
+            preds1 <- cbind(ID=pred_data$ID,S_k_pred_wide_all_1)
+            for (t in seq_along(evt_times_uni)){
+              #Collecting appropriate survival preds
+              pred0 <- preds0[,c(1,t+1)]
+              names(pred0)[2] <- "S_t_pred_long_all_0"
+              pred1 <- preds1[,c(1,t+1)]
+              names(pred1)[2] <- "S_t_pred_long_all_1"
+
+              #Merging with long pred data
+              pred_data_long_all_temp <- merge(pred_data_long_all,pred0,by="ID",all.x=TRUE)
+              pred_data_long_all_temp <- merge(pred_data_long_all_temp,pred1,by="ID",all.x=TRUE)
+
+              pred_data_long_all_temp <- pred_data_long_all_temp %>% mutate(S_t_pred_long_all_a = case_when(
+                A == 1 ~ S_t_pred_long_all_1,
+                A == 0 ~ S_t_pred_long_all_0
+              ))
+
+              # Saving data to list
+              temp_data_list[[t]] <- pred_data_long_all_temp
+            }
+          }
+        }
       },
       #if an error occurs, tell me the error
       error=function(e) {
@@ -615,7 +734,7 @@ nuis_mod_surv <- function(model,
             }
           }
         }
-        if (method == "Super learner"){
+        if (method == "Survival stack"){
           uni_time <- rep(evt_times_uni, times = nrow(pred_data))
           
           #Obtaining predictions from outcome models 
@@ -765,6 +884,25 @@ nuis_mod_surv <- function(model,
             pred_data_long_all <- pred_data_long_all_final
           }
         }
+        if (method == "Survival stack"){
+          uni_time <- rep(evt_times_uni, times = nrow(pred_data))
+          
+          #Obtaining predictions from outcome models 
+          G_k_pred_wide_all <- as.data.frame(mod$S_T_preds)
+          
+          #Making into long form 
+          ncols_temp <- ncol(pred_data)
+          pred_data <- cbind(pred_data,G_k_pred_wide_all)
+          
+          pred_data_temp <- pred_data %>%
+            pivot_longer(
+              cols = starts_with("V"),  
+              names_to = "time2",           
+              values_to = "G_k_pred"         
+            )
+          pred_data_long_all <- pred_data_temp
+          pred_data_long_all$time <- uni_time
+        }
       },
       #if an error occurs, tell me the error
       error=function(e) {
@@ -782,7 +920,7 @@ nuis_mod_surv <- function(model,
           #Censoring estimates (Training and all data points)
           G_k_pred_long_all <- predict(mod,newdata=pred_data_long_all,type="survival")
         }
-        else if (method == "Super learner"){
+        else if (method == "Survival stack"){
           uni_time <- rep(evt_times_uni, times = nrow(pred_data))
           
           #Obtaining predictions from outcome models 
@@ -821,7 +959,7 @@ nuis_mod_surv <- function(model,
           trunc_temp_k_pred_long_all <- predict(mod,newdata=pred_data_long_all,type="survival")
           trunc_k_pred_long_all <- 1 - trunc_temp_k_pred_long_all
         }
-        else if (method == "Super learner"){
+        else if (method == "Survival stack"){
           #Making predictions for at each time for each person
           pred_data <- subset(pred_data_long_all, select = c(covariates,"time"))
           pred_data$time <- as.factor(pred_data$time)
@@ -918,16 +1056,16 @@ nuis_mod_surv <- function(model,
 
 
   #-----------------------------#
-  #--- Returning information ---#    #Make sure LT output aligns or gets specified 
+  #--- Returning information ---#    #UPDATE FOR SURV STACK OPTIONS
   #-----------------------------#
 
-  if (model == "Outcome" & method == "Super learner"  & (learner == "survEP-learner" | learner == "M-learner")){
-      output <- list(out_mod_0 = mod_0,
-                     out_mod_1 = mod_1,
-                     pred_data_long_all_pred = pred_data_long_all,
-                     Surv_t_pred_long_all_list=temp_data_list)
+  if (model == "Outcome" & (method == "Super learner" | method == "Survival stack") & (learner == "survEP-learner" | learner == "M-learner")){
+    output <- list(out_mod_0 = mod_0,
+                   out_mod_1 = mod_1,
+                   pred_data_long_all_pred = pred_data_long_all,
+                   Surv_t_pred_long_all_list=temp_data_list)
   }
-  else if (model == "Outcome" & method != "Super learner"  & (learner == "survEP-learner" | learner == "M-learner")){
+  else if (model == "Outcome" & (method != "Super learner" & method != "Survival stack")  & (learner == "survEP-learner" | learner == "M-learner")){
     output <- list(S_k_pred_long_all_0 = S_k_pred_long_all_0,
                    S_k_pred_long_all_1 = S_k_pred_long_all_1,
                    H_k_pred_long_all_0 = H_k_pred_long_all_0,
@@ -944,7 +1082,7 @@ nuis_mod_surv <- function(model,
                    out_mod_0 = mod_0,
                    out_mod_1 = mod_1)
   }
-  else if (model == "Outcome" & learner == "T-learner" & method == "Super learner"){
+  else if (model == "Outcome" & learner == "T-learner" & (method == "Super learner" | method == "Survival stack")){
     output <- list(pred_data_long_all_pred = pred_data_long_all,
                    out_mod_0 = mod_0,
                    out_mod_1 = mod_1)
@@ -957,7 +1095,7 @@ nuis_mod_surv <- function(model,
     output <- list(G_k_pred_long_all = G_k_pred_long_all,
                    G_mod = mod)
   }
-  else if (model == "Censoring" & method == "Super learner"){
+  else if (model == "Censoring" & (method == "Super learner" | method == "Survival stack")){
     output <- list(G_k_pred_long_all = pred_data_long_all,
                    G_mod = mod)
   }
@@ -965,7 +1103,7 @@ nuis_mod_surv <- function(model,
     output <- list(trunc_k_pred_long_all = trunc_k_pred_long_all,
                    trunc_mod = mod)
   }
-  else if (model == "Truncation" & method == "Super learner"){
+  else if (model == "Truncation" & method == "Survival stack"){
     output <- list(trunc_k_pred_long_all = pred_data_long_all,
                    trunc_mod = mod)
   }
