@@ -104,7 +104,7 @@ T_learner <- function(data,
           pred_data$S_k_pred_0 <- outcome_models$S_k_pred_long_all_0
           pred_data$S_k_pred_1 <- outcome_models$S_k_pred_long_all_1
         }
-        else if (out_method == "Super learner"){
+        else if (out_method == "Super learner" | out_method == "Local survival stack" | out_method == "Global survival stack"){
           pred_data$S_k_pred_0 <- outcome_models$pred_data_long_all_pred$S_k_pred_0
           pred_data$S_k_pred_1 <- outcome_models$pred_data_long_all_pred$S_k_pred_1
         }
@@ -184,8 +184,8 @@ T_check <- T_learner(data = ACTG175_data,
                      # truncation = "trunc",
                      time_cuts = seq(from=200,to=1100,by=100),
                      out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                     out_method = "Super learner",
-                     out_SL_lib = event.SL.library,
+                     out_method = "Local survival stack",
+                     out_SL_lib = event.SL.library2,
                      newdata = ACTG175_data)
 
 
