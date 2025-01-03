@@ -1151,7 +1151,7 @@ nuis_mod_surv <- function(model,
                    out_mod_0 = mod_0,
                    out_mod_1 = mod_1)
   }
-  else if (model == "Outcome" & learner == "T-learner" & (method == "Super learner" | method == "Global survival stack")){
+  else if (model == "Outcome" & learner == "T-learner" & (method == "Super learner" | method == "Local survival stack" | method == "Global survival stack")){
     output <- list(pred_data_long_all_pred = pred_data_long_all,
                    out_mod_0 = mod_0,
                    out_mod_1 = mod_1)
