@@ -80,7 +80,7 @@ data_manage_surv <- function(data,
       if (learner != "CSF"){
         vars <- append(vars,out_covariates)
       }
-      if (learner == "survEP-learner" | learner == "M-learner"){     #Add others if functions when coding other functions
+      if (learner == "surviTMLE-learner" | learner == "M-learner"){     #Add others if functions when coding other functions
         vars <- append(vars,e_covariates)
         vars <- append(vars,g_covariates)
         vars <- append(vars,pse_covariates)
@@ -89,7 +89,7 @@ data_manage_surv <- function(data,
         vars <- append(vars,e_covariates)
         vars <- append(vars,pse_covariates)
       }
-      if (learner == "survEP-learner" & LT_data == 1){
+      if (learner == "surviTMLE-learner" & LT_data == 1){
         vars <- append(vars,h_covariates)
       }
 
@@ -296,7 +296,7 @@ data_manage_surv <- function(data,
       #   ))
       # }
 
-      if (learner == "survEP-learner" | learner == "M-learner"){
+      if (learner == "surviTMLE-learner" | learner == "M-learner"){
         new_data_vars <- c("ID",pse_covariates,"time")
         newdata_long_all <- subset(newdata_long_all,select=new_data_vars)
       }
@@ -346,7 +346,7 @@ data_manage_surv <- function(data,
   #-----------------------------#
   #--- Returning information ---#
   #-----------------------------#
-  if (learner == "survEP-learner" | learner == "M-learner" | learner == "T-learner" | learner == "CSF"){
+  if (learner == "surviTMLE-learner" | learner == "M-learner" | learner == "T-learner" | learner == "CSF"){
     if (time_cuts[1] == "N/A"){
       output <- list(data=data,
                      data_long_all=data_long_all,

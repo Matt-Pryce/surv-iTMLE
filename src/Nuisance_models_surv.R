@@ -742,7 +742,7 @@ nuis_mod_surv <- function(model,
           S_k_pred_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="survival")
           S_k_pred_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="survival")
 
-          if (learner == "survEP-learner" | learner == "M-learner"){
+          if (learner == "surviTMLE-learner" | learner == "M-learner"){
             #Hazard estimates at the time point (All time point data)
             pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
             pred_data_long_all <- pred_data_long_all %>%
@@ -833,7 +833,7 @@ nuis_mod_surv <- function(model,
                 row[col_index_offset + row['time_seq']]
               })
             }
-            if (learner == "survEP-learner" | learner == "M-learner"){
+            if (learner == "surviTMLE-learner" | learner == "M-learner"){
               #Defining S_k predictions for the dataset
               pred_data_long_all_temp$time_seq <- match(pred_data_long_all_temp$time, evt_times_uni)
               col_index_offset <- 9 + length(covariates)
@@ -895,7 +895,7 @@ nuis_mod_surv <- function(model,
 
           pred_data_long_all <- pred_data_long_all_final
 
-          if (learner == "survEP-learner" | learner == "M-learner"){
+          if (learner == "surviTMLE-learner" | learner == "M-learner"){
           keep_covs <- append(c("ID","Y","A","C","tstart","time","s",
                                 "S_k_pred_0","S_k_pred_1","H_k_pred_0","H_k_pred_1","h_k_pred_0","h_k_pred_1","at_risk"),covariates)
           }
@@ -935,7 +935,7 @@ nuis_mod_surv <- function(model,
           S_k_pred_long_all_0 <- pred_data_long_all$S_k_pred_0
           S_k_pred_long_all_1 <- pred_data_long_all$S_k_pred_1
 
-          if (learner == "survEP-learner"){
+          if (learner == "surviTMLE-learner"){
             #Calculating cumulative hazard estimates
             pred_data_long_all$H_k_pred_0 <- -log(pred_data_long_all$S_k_pred_0)
             pred_data_long_all$H_k_pred_1 <- -log(pred_data_long_all$S_k_pred_1)
@@ -994,7 +994,7 @@ nuis_mod_surv <- function(model,
          S_k_pred_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="survival")
          S_k_pred_long_all_1 <- predict(mod_1,newdata=pred_data_long_all,type="survival")
 
-         if (learner == "survEP-learner"){
+         if (learner == "surviTMLE-learner"){
            #Hazard estimates at the time point (All time point data)
            pred_data_long_all$H_k_long_all_0 <- predict(mod_0,newdata=pred_data_long_all,type="expected")
            pred_data_long_all <- pred_data_long_all %>%
@@ -1074,7 +1074,7 @@ nuis_mod_surv <- function(model,
            S_k_pred_long_all_0 <- pred_data_long_all$S_k_pred_0
            S_k_pred_long_all_1 <- pred_data_long_all$S_k_pred_1
 
-           if (learner == "survEP-learner"){
+           if (learner == "surviTMLE-learner"){
              #Calculating cumulative hazard estimates
              pred_data_long_all$H_k_pred_0 <- -log(pred_data_long_all$S_k_pred_0)
              pred_data_long_all$H_k_pred_1 <- -log(pred_data_long_all$S_k_pred_1)
@@ -1148,7 +1148,7 @@ nuis_mod_surv <- function(model,
            S_k_pred_long_all_0 <- pred_data_long_all$S_k_pred_0
            S_k_pred_long_all_1 <- pred_data_long_all$S_k_pred_1
 
-           # if (learner == "survEP-learner"){
+           # if (learner == "surviTMLE-learner"){
            #   #Calculating cumulative hazard estimates
            #   pred_data_long_all$H_k_pred_0 <- -log(pred_data_long_all$S_k_pred_0)
            #   pred_data_long_all$H_k_pred_1 <- -log(pred_data_long_all$S_k_pred_1)
@@ -1511,7 +1511,7 @@ nuis_mod_surv <- function(model,
   #--- Returning information ---#    
   #-----------------------------#
 
-  if (model == "Outcome" & (method == "Super learner" | method == "Global survival stack" | method == "Local survival stack") & (learner == "survEP-learner" | learner == "M-learner")){
+  if (model == "Outcome" & (method == "Super learner" | method == "Global survival stack" | method == "Local survival stack") & (learner == "surviTMLE-learner" | learner == "M-learner")){
     output <- list(out_mod_0 = mod_0,
                   out_mod_1 = mod_1,
                   pred_data_long_all_pred = pred_data_long_all,
@@ -1524,7 +1524,7 @@ nuis_mod_surv <- function(model,
   if (model == "Outcome - Diff"){
     output <- G_diff_k_pred_wide_all
   }
-  else if (model == "Outcome" & (method != "Super learner" & method != "Local survival stack" & method != "Global survival stack")  & (learner == "survEP-learner" | learner == "M-learner")){
+  else if (model == "Outcome" & (method != "Super learner" & method != "Local survival stack" & method != "Global survival stack")  & (learner == "surviTMLE-learner" | learner == "M-learner")){
     output <- list(S_k_pred_long_all_0 = S_k_pred_long_all_0,
                    S_k_pred_long_all_1 = S_k_pred_long_all_1,
                    H_k_pred_long_all_0 = H_k_pred_long_all_0,
