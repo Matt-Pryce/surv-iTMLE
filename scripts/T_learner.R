@@ -11,6 +11,8 @@ library(timereg)
 library(boot)
 library(grf)
 library(SuperLearner)
+library(tidyr)
+library(glmnet)
 
 
 #######################################
@@ -44,6 +46,7 @@ library(SuperLearner)
 
 
 T_learner <- function(data,
+                      estimand,
                       id,
                       time, 
                       outcome,
@@ -100,7 +103,7 @@ T_learner <- function(data,
 
         #Saving survival predictions
         pred_data <- clean_data$newdata_long_all
-        if (out_method == "Parametric"){
+        if (out_method == "Parametric" | out_method == "pcox"){
           pred_data$S_k_pred_0 <- outcome_models$S_k_pred_long_all_0
           pred_data$S_k_pred_1 <- outcome_models$S_k_pred_long_all_1
         }
@@ -122,11 +125,22 @@ T_learner <- function(data,
   #-------------------------------#
 
   if (nuisance_estimates_input == 0){
-    pred_data$CATE_est <- pred_data$S_k_pred_1 - pred_data$S_k_pred_0
+    if (estimand == "Difference"){
+      pred_data$CATE_est <- pred_data$S_k_pred_1 - pred_data$S_k_pred_0
+    }
+    if (estimand == "Ratio"){
+      pred_data$CATE_est <- pred_data$S_k_pred_1/pred_data$S_k_pred_0
+    }
   }
   else if (nuisance_estimates_input == 1){
-    pred_data <- clean_data$newdata_long_all
-    pred_data$CATE_est <- clean_data$newdata_long_all[["o_1_pred"]] - clean_data$newdata_long_all[["o_0_pred"]]
+    if (estimand == "Difference"){
+      pred_data <- clean_data$newdata_long_all
+      pred_data$CATE_est <- clean_data$newdata_long_all[["o_1_pred"]] - clean_data$newdata_long_all[["o_0_pred"]]
+    }
+    else if (estimand == "Ratio"){
+      pred_data <- clean_data$newdata_long_all
+      pred_data$CATE_est <- clean_data$newdata_long_all[["o_1_pred"]]/clean_data$newdata_long_all[["o_0_pred"]]
+    }
   }
 
   #-----------------------------#
@@ -153,7 +167,7 @@ T_learner <- function(data,
 #---------------#
 #--- Example ---#
 #---------------#
-load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
+load("C:/Users/MatthewPryce/OneDrive - London School of Hygiene and Tropical Medicine/Documents/PhD/DR_Missing_Paper/Data_example/ACTG175/Data/ACTG175_data.RData")
 
 ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
 ACTG175_data <- ACTG175_data[1:800,]
@@ -161,7 +175,7 @@ ACTG175_data$trunc <- round(runif(800,0,250))
 ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
 
 
-LT <- 0
+LT <- 1
 
 if (LT==1){
   event.SL.library <- c("SL.mean",
@@ -176,18 +190,18 @@ if (LT == 0){
 start_time <- proc.time()
 
 T_check <- T_learner(data = ACTG175_data,
+                     estimand = "Difference",
                      id = "pidnum",
                      time = "days", 
                      outcome = "cens",
                      censor = "censor_ind",
                      exposure = "treat",
-                     # truncation = "trunc",
-                     time_cuts = seq(from=200,to=1100,by=100),
+                     truncation = "trunc",
+                     time_cuts = seq(from=200,to=400,by=100),
                      out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                     out_method = "Local survival stack",
-                     out_SL_lib = event.SL.library2,
+                     out_method = "pcox",
+                     out_SL_lib = event.SL.library,
                      newdata = ACTG175_data)
-
 
 end_time <- proc.time()
 end_time - start_time
