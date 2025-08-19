@@ -42,13 +42,11 @@ data_gen_surv <- function(n = 1000,
                           aft_func_T,
                           pois_func_T,
                           unif_end_T,
-                          Q_type,
-                          H_0_lambda_Q,
-                          H_0_gamma_Q,
-                          cox_func_Q,
-                          aft_func_Q,
-                          pois_func_Q,
-                          unif_end_Q,
+                          Q_type = "Beta",
+                          Q_alpha_base,
+                          Q_alpha_func,
+                          Q_beta_base,
+                          Q_beta_func,
                           max_Q = NULL,
                           C_type,
                           H_0_lambda_C,
@@ -159,36 +157,53 @@ data_gen_surv <- function(n = 1000,
   
   if (is.null(LT) == 0){
     #--- Generating truncation time Q ---#
-    if (Q_type == "Cox"){
-      #Cox needs to specify baseline hazard and combination
-      U <- runif(n)
-      Q <- (-log(U) / (H_0_lambda_Q * exp(cox_func_Q(X))))^(1 / H_0_gamma_Q)
+    if (Q_type == "Beta"){
+      #Defining variance for alpha and beta
+      alpha_epsilon <- rnorm(dim(X)[1],0,0.1)
+      beta_epsilon <- rnorm(dim(X)[1],0,0.5)
+    
+      #Calculating each persons alpha and beta 
+      alpha <- Q_alpha_base + Q_alpha_func(X) + alpha_epsilon
+      beta <- Q_beta_base + Q_beta_func(X) + beta_epsilon
+      
+      #Generate beta-distributed truncation times
+      beta_samples <- rbeta(dim(X)[1], shape1 = alpha, shape2 = beta)
+      
+      #Scale truncation times to the desired range
+      start_time <- 0    
+      end_time <- max_Q     
+      Q <- start_time + beta_samples * (end_time - start_time)
     }
-    if (Q_type == "AFT"){
-      epsilon <- rnorm(dim(X)[1])
-      log_Q <- aft_func_Q(X) + epsilon
-      Q <- exp(log_Q)
-    }
-    if (Q_type == "Poisson"){
-      Q <- rep(-99,n)
-      event_counts <- rpois(n, lambda = pois_func_Q(X))
-      for (i in 1:n){
-        if (event_counts[i] > 0){
-          Q[i] <- rexp(1, rate = event_counts[i])
-        }
-        else {
-          Q[i] <- Inf
-        }
-      }
-    }
-    if (Q_type == "Unif"){
-      Q <- runif(n,0,unif_end_Q)
-    }
-
-    #Adding in max trunc option
-    if (is.null(max_Q) == 0){
-      Q <- pmin(Q,max_Q)
-    }
+    # if (Q_type == "Cox"){
+    #   #Cox needs to specify baseline hazard and combination
+    #   U <- runif(n)
+    #   Q <- (-log(U) / (H_0_lambda_Q * exp(cox_func_Q(X))))^(1 / H_0_gamma_Q)
+    # }
+    # if (Q_type == "AFT"){
+    #   epsilon <- rnorm(dim(X)[1])
+    #   log_Q <- aft_func_Q(X) + epsilon
+    #   Q <- exp(log_Q)
+    # }
+    # if (Q_type == "Poisson"){
+    #   Q <- rep(-99,n)
+    #   event_counts <- rpois(n, lambda = pois_func_Q(X))
+    #   for (i in 1:n){
+    #     if (event_counts[i] > 0){
+    #       Q[i] <- rexp(1, rate = event_counts[i])
+    #     }
+    #     else {
+    #       Q[i] <- Inf
+    #     }
+    #   }
+    # }
+    # if (Q_type == "Unif"){
+    #   Q <- runif(n,0,unif_end_Q)
+    # }
+    # 
+    #     #Adding in max trunc option
+    #     if (is.null(max_Q) == 0){
+    #       Q <- pmin(Q,max_Q)
+    #     }
 
     #--- Generating censoring time C=Q+D ---#
     if (C_type == "Cox"){
@@ -246,7 +261,7 @@ data_gen_surv <- function(n = 1000,
 }
 
 #####################################################################
-
+# 
 # e_func <- function(X){
 #   X2 <- X$X2;
 #   X3 <- X$X3;
@@ -280,7 +295,27 @@ data_gen_surv <- function(n = 1000,
 # H_0_gamma <- 2
 # 
 # 
-# n=400
+# alpha_func <- function(X){
+#   X1 <- X$X1
+#   X2 <- X$X2
+#   X3 <- X$X3
+#   alph <- 0.5*(X1^2) + 0.5*(0.5-X2)
+#   alph
+# }
+# 
+# beta_func <- function(X){
+#   X1 <- X$X1
+#   X2 <- X$X2
+#   X3 <- X$X3
+#   bet <- (X2^3) + 0.5*(X3>0.5)
+#   bet
+# }
+# 
+# alpha_base <- 2
+# beta_base <- 15
+# max_Q <- 2
+# 
+# n=10000
 # 
 # covs <- 6
 # 
@@ -295,14 +330,12 @@ data_gen_surv <- function(n = 1000,
 #                           unif_end_T = 3,
 #                           H_0_lambda_T = H_0_lambda,
 #                           H_0_gamma_T = H_0_gamma,
-#                           Q_type = "Cox",
-#                           cox_func_Q = cox_func,
-#                           aft_func_Q = aft_func,
-#                           pois_func_Q = pois_func,
-#                           unif_end_Q = 3,
-#                           H_0_lambda_Q = H_0_lambda,
-#                           H_0_gamma_Q = H_0_gamma,
-#                           max_Q = 0.3,
+#                           Q_type = "Beta",
+#                           Q_alpha_base = alpha_base,
+#                           Q_alpha_func = alpha_func,
+#                           Q_beta_base = beta_base,
+#                           Q_beta_func = beta_func,
+#                           max_Q = max_Q,
 #                           C_type = "AFT",
 #                           cox_func_C = cox_func,
 #                           aft_func_C = aft_func,
@@ -312,6 +345,12 @@ data_gen_surv <- function(n = 1000,
 #                           unif_end_C = 3,
 #                           right_cen = 5,
 #                           LT = 1)
+# 
+# 
+# ####################################################################################################################
+# 
+# #--- Reviewing level of truncation ---#
+# sum(sim_data$Observed)/10000
 
 
 # #Finding truth 
