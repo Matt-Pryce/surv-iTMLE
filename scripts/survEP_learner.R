@@ -31,6 +31,7 @@ library(pec)
 library(timeROC)
 library(survSuperLearner)
 library(survML)
+library(mgcv)
 
 #######################################
 #--- For single time point setting ---#
@@ -72,6 +73,7 @@ library(survML)
 
 
 survEP_learner <- function(data,
+                           estimand,
                            id,
                            time, 
                            outcome,
@@ -212,6 +214,31 @@ survEP_learner <- function(data,
     )
 
     #--- Running nuisance models & obtaining predictions ---#
+    #Creating weights for propensity score/truncation probs (only if LT present)
+    if (clean_data$LT_data == 1){
+      tryCatch(
+        {
+          trunc_weight_model <- nuis_mod_surv(model = "Truncation weight",
+                                              data = o_data,
+                                              method = out_method,
+                                              covariates = out_covariates,
+                                              pred_data_long_all = po_o_data_long_all,
+                                              evt_times_uni = clean_data$evt_times_uni,
+                                              SL_lib = out_SL_lib,
+                                              learner = "survEP-learner",
+                                              LT = clean_data$LT_data)
+
+          e_data$trunc_weight_pred <- trunc_weight_model$trunc_weight_pred
+          h_data$trunc_weight_pred <- trunc_weight_model$trunc_weight_pred
+        },
+        #if an error occurs, tell me the error
+        error=function(e) {
+          stop(paste("An error occured in truncation weight model function in split ",i,sep=""))
+          print(e)
+        }
+      )
+    }
+    
     #Propensity score model
     tryCatch(
       {
@@ -220,7 +247,8 @@ survEP_learner <- function(data,
                                   method = e_method,
                                   covariates = e_covariates,
                                   SL_lib = e_SL_lib,
-                                  pred_data = po_e_data_long_all)
+                                  pred_data = po_e_data_long_all,
+                                  LT = clean_data$LT_data)
 
         po_data_long_all$e_pred <- PS_model$e_pred
       },
@@ -296,7 +324,26 @@ survEP_learner <- function(data,
                                          LT = clean_data$LT_data)
 
         if (g_method == "Super learner" | g_method == "Local survival stack" | g_method == "Global survival stack"){
-          po_data_long_all$G_k_pred <- censoring_model$G_k_pred_long_all$G_k_pred
+          if (clean_data$LT_data == 0){
+            po_data_long_all$G_k_pred <- censoring_model$G_k_pred_long_all$G_k_pred
+          }
+          else if (clean_data$LT_data == 1){
+            #Number of time points
+            num_tp <- length(clean_data$evt_times_uni)
+
+            #Collecting predictions
+            G_preds <- censoring_model$G_k_pred_long_all[, (ncol(censoring_model$G_k_pred_long_all)-(num_tp-1)):ncol(censoring_model$G_k_pred_long_all)]
+
+            #Merging with po_data_long_all
+            po_data_long_all <- cbind(po_data_long_all,G_preds)
+
+            #Making preds 0 when conditional Q occurs after the time
+            for(var_ind in 1:(num_tp-1)) {
+              cols_to_zero <- paste0("G_k_Q", (var_ind+1):(num_tp))
+              po_data_long_all[po_data_long_all$time == clean_data$evt_times_uni[var_ind], cols_to_zero] <- 0
+            }
+          }
+
         }
         else if (g_method == "Parametric"){
           po_data_long_all$G_k_pred <- censoring_model$G_k_pred_long_all
@@ -319,6 +366,7 @@ survEP_learner <- function(data,
                                        covariates = h_covariates,
                                        evt_times_uni = clean_data$evt_times_uni,
                                        SL_lib = h_SL_lib,
+                                       learner = "survEP-learner",
                                        pred_data_long_all = po_h_data_long_all,
                                        LT = clean_data$LT_data)
 
@@ -328,6 +376,12 @@ survEP_learner <- function(data,
           else if (h_method == "Parametric"){
             po_data_long_all$trunc_k_pred <- trunc_model$trunc_k_pred_long_all
           }
+
+          #Calculating hazard of truncation
+          po_data_long_all <- po_data_long_all %>%
+            arrange(ID, tstart) %>%  # Ensure correct order
+            group_by(ID) %>%
+            mutate(trunc_k_haz = if_else(row_number() == 1, trunc_k_pred, trunc_k_pred - lag(trunc_k_pred)))
         },
         #if an error occurs, tell me the error
         error=function(e) {
@@ -335,7 +389,24 @@ survEP_learner <- function(data,
           print(e)
         }
       )
+
+      #--- Calculating product of truncation hazard and censoring used in re-weighting ---#
+      num_tp <- length(clean_data$evt_times_uni)
+      times <- clean_data$evt_times_uni
+      po_data_long_all_split <- split(po_data_long_all, po_data_long_all$ID)
+
+      po_data_long_all_list <- lapply(po_data_long_all_split, function(df) {
+        df$product <- 0
+        for(t in 1:num_tp) {
+          df$product[df$time == times[t]] <- sum(df[t, paste0("G_k_Q", 1:num_tp)] * df$trunc_k_haz)
+        }
+        df
+      })
+
+      po_data_long_all <- do.call(rbind, po_data_long_all_list)
     }
+
+
 
     #--- Collecting long datasets ---#
     if (i==0){
@@ -487,39 +558,72 @@ survEP_learner <- function(data,
 
       #--- Create clever covariate for each time point ---#
       if (clean_data$LT_data == 0){
-        targeting_data$H_0 <- targeting_data$at_risk *
-          ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
-          (1/targeting_data$G_k_pred) *
-          (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
+        if (estimand == "Difference"){
+          targeting_data$H_0 <- targeting_data$at_risk *
+            ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
 
-        targeting_data$H_1 <- targeting_data$at_risk *
-          (targeting_data$A/targeting_data$e_pred) *
-          (1/targeting_data$G_k_pred) *
-          (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
+          targeting_data$H_1 <- targeting_data$at_risk *
+            (targeting_data$A/targeting_data$e_pred) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
 
-        targeting_data$H_a <- targeting_data$at_risk *
-          ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
-          (1/targeting_data$G_k_pred) *
-          (targeting_data$S_t_pred_a/targeting_data$S_k_pred_a)
+          targeting_data$H_a <- targeting_data$at_risk *
+            ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_a/targeting_data$S_k_pred_a)
+        }
+        else if (estimand == "Ratio"){
+          targeting_data$H_0 <- targeting_data$at_risk *
+            ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_0*targeting_data$S_t_pred_0))
+
+          targeting_data$H_1 <- targeting_data$at_risk *
+            (targeting_data$A/targeting_data$e_pred) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_1*targeting_data$S_t_pred_0))
+
+          targeting_data$H_a <- targeting_data$at_risk *
+            ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
+            (1/targeting_data$G_k_pred) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_a*targeting_data$S_t_pred_0))
+        }
       }
       else if (clean_data$LT_data == 1){
-        targeting_data$H_0 <- targeting_data$at_risk *
-          ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
-          (1/targeting_data$G_k_pred) *
-          (1/targeting_data$trunc_k_pred) *
-          (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
+        if (estimand == "Difference"){
+          targeting_data$H_0 <- targeting_data$at_risk *
+            ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_0/targeting_data$S_k_pred_0)
 
-        targeting_data$H_1 <- targeting_data$at_risk *
-          (targeting_data$A/targeting_data$e_pred) *
-          (1/targeting_data$G_k_pred) *
-          (1/targeting_data$trunc_k_pred) *
-          (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
+          targeting_data$H_1 <- targeting_data$at_risk *
+            (targeting_data$A/targeting_data$e_pred) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_1/targeting_data$S_k_pred_1)
 
-        targeting_data$H_a <- targeting_data$at_risk *
-          ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
-          (1/targeting_data$G_k_pred) *
-          (1/targeting_data$trunc_k_pred) *
-          (targeting_data$S_t_pred_a/targeting_data$S_k_pred_a)
+          targeting_data$H_a <- targeting_data$at_risk *
+            ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_a/targeting_data$S_k_pred_a)
+        }
+        else if (estimand == "Ratio"){
+          targeting_data$H_0 <- targeting_data$at_risk *
+            ((1-targeting_data$A)/(1-targeting_data$e_pred)) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_0*targeting_data$S_t_pred_0))
+
+          targeting_data$H_1 <- targeting_data$at_risk *
+            (targeting_data$A/targeting_data$e_pred) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_1*targeting_data$S_t_pred_0))
+
+          targeting_data$H_a <- targeting_data$at_risk *
+            ((targeting_data$A/targeting_data$e_pred) + ((1-targeting_data$A)/(1-targeting_data$e_pred))) *
+            (1/targeting_data$product) *
+            (targeting_data$S_t_pred_1/(targeting_data$S_k_pred_a*targeting_data$S_t_pred_0))
+        }
       }
 
 
@@ -1122,117 +1226,149 @@ survEP_learner <- function(data,
   #--- Pseudo-outcome regression ---#
   #---------------------------------#
   #--- Pooled logistic regression ---#
-  if (pse_approach == "Pooled"){
-    pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
-    pse_model <- nuis_mod_surv(model = "Pseudo outcome - Pooled",
+  if (pse_approach == "Pooled - Factor"){
+    if (estimand == "Difference"){
+      pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
+    }
+    else if (estimand == "Ratio"){
+      pred_dataset_all$pse_Y <- log(pred_dataset_all$S_k_pred_1_star_final/pred_dataset_all$S_k_pred_0_star_final)
+    }
+    pse_model <- nuis_mod_surv(model = "Pseudo outcome - Pooled - Factor",
                                      data = pred_dataset_all,
                                      method = pse_method,
                                      covariates = pse_covariates,
                                      SL_lib = pse_SL_lib,
                                      pred_data_long_all = clean_data$newdata_long_all)
+    if (estimand == "Difference"){
+      pse_pred <- pse_model$pred
+    }
+    else if (estimand == "Ratio"){
+      pse_model$pred$pred <- exp(pse_model$pred$pred)
+      pse_pred <- pse_model$pred
+    }
+  }
+  else if (pse_approach == "Pooled - Continuous"){
+    if (estimand == "Difference"){
+      pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
+    }
+    else if (estimand == "Ratio"){
+      pred_dataset_all$pse_Y <- log(pred_dataset_all$S_k_pred_1_star_final/pred_dataset_all$S_k_pred_0_star_final)
+    }
+    pse_model <- nuis_mod_surv(model = "Pseudo outcome - Pooled - Continuous",
+                               data = pred_dataset_all,
+                               method = pse_method,
+                               covariates = pse_covariates,
+                               SL_lib = pse_SL_lib,
+                               pred_data_long_all = clean_data$newdata_long_all)
+    if (estimand == "Difference"){
+      pse_pred <- pse_model$pred
+    }
+    else if (estimand == "Ratio"){
+      pse_model$pred$pred <- exp(pse_model$pred$pred)
+      pse_pred <- pse_model$pred
+    }
   }
   else if (pse_approach == "None"){
     pred_dataset_all$pse_Y <- pred_dataset_all$S_k_pred_1_star_final - pred_dataset_all$S_k_pred_0_star_final
   }
 
 
-  #-----------------------#
-  #--- Generating CI's ---#
-  #-----------------------#
-
-  if (CI == TRUE & pse_approach == "Pooled" & pse_method == "Random forest"){
-    unique_ids <- unique(pred_dataset_all$ID)
-    for (i in 1:num_boot){
-      # Randomly sample half the rows
-      set.seed(596967 + i)  # Set seed for reproducibility
-      selected_ids <- sample(unique_ids, floor(length(unique_ids) / 2), replace = FALSE)
-      half_sample <- pred_dataset_all[pred_dataset_all$ID %in% selected_ids, ]
-      half_sample <- half_sample %>% arrange(ID, time)
-
-      #Running final stage model
-      tuned_parameters <- pse_model$po_mod$tunable.params
-      tryCatch(
-        {
-          pse_model_hs <- nuis_mod_surv(model = "Pseudo outcome - Pooled - CI",
-                                        data = half_sample,
-                                        method = pse_method,
-                                        covariates = pse_covariates,
-                                        SL_lib = pse_SL_lib,
-                                        pred_data_long_all = clean_data$newdata_long_all,
-                                        CI_tuned_params = tuned_parameters)
-
-          half_sample_est <- pse_model_hs$pred
-        },
-        #if an error occurs, tell me the error
-        error=function(e) {
-          stop(paste("An error occured when fitting the pseudo outcome model in split ",i,sep=""))
-          print(e)
-        }
-      )
-
-      #Creating R and storing
-      full_sample_est <- pse_model$pred$pred
-
-      R <- full_sample_est - half_sample_est
-
-      if (i == 1){
-        R_data <- as.data.frame(R)
-      }
-      else {
-        R_data <- cbind(R_data,R)
-      }
-    }
-
-    #Gaining variance of R per person
-    CI_n_rows <- length(full_sample_est)
-    for (i in 1:CI_n_rows){
-      # sqrt_n <- sqrt(num_boot)
-      # temp <-  sqrt_n * R_data[i,]
-      # var <- apply(temp, MARGIN = 1, FUN = var)
-      # SE <- sqrt(var)
-      #
-      # LCI <- pse_model$po_pred[i,] - (1/sqrt_n)*SE*1.96
-      # UCI <- pse_model$po_pred[i,] + (1/sqrt_n)*SE*1.96
-
-      temp <-  R_data[i,]
-      var <- apply(temp, MARGIN = 1, FUN = var)
-      SE <- sqrt(var)
-
-      LCI <- full_sample_est[i] - SE*1.96
-      UCI <- full_sample_est[i] + SE*1.96
-
-      if (i == 1){
-        LCI_data <- LCI
-        UCI_data <- UCI
-      }
-      else {
-        LCI_data <- append(LCI_data,LCI)
-        UCI_data <- append(UCI_data,UCI)
-      }
-    }
-  }
-  else if (CI == TRUE & pse_approach == "Pooled" & pse_method != "Random forest"){
-    return("Inappropriate pseudo-outcome regression method for obtaining CI's")
-  }
-
-
+  # #-----------------------#
+  # #--- Generating CI's ---#
+  # #-----------------------#
+  #
+  # if (CI == TRUE & pse_approach == "Pooled" & pse_method == "Random forest"){
+  #   unique_ids <- unique(pred_dataset_all$ID)
+  #   for (i in 1:num_boot){
+  #     # Randomly sample half the rows
+  #     set.seed(596967 + i)  # Set seed for reproducibility
+  #     selected_ids <- sample(unique_ids, floor(length(unique_ids) / 2), replace = FALSE)
+  #     half_sample <- pred_dataset_all[pred_dataset_all$ID %in% selected_ids, ]
+  #     half_sample <- half_sample %>% arrange(ID, time)
+  #
+  #     #Running final stage model
+  #     tuned_parameters <- pse_model$po_mod$tunable.params
+  #     tryCatch(
+  #       {
+  #         pse_model_hs <- nuis_mod_surv(model = "Pseudo outcome - Pooled - CI",
+  #                                       data = half_sample,
+  #                                       method = pse_method,
+  #                                       covariates = pse_covariates,
+  #                                       SL_lib = pse_SL_lib,
+  #                                       pred_data_long_all = clean_data$newdata_long_all,
+  #                                       CI_tuned_params = tuned_parameters)
+  #
+  #         half_sample_est <- pse_model_hs$pred
+  #       },
+  #       #if an error occurs, tell me the error
+  #       error=function(e) {
+  #         stop(paste("An error occured when fitting the pseudo outcome model in split ",i,sep=""))
+  #         print(e)
+  #       }
+  #     )
+  #
+  #     #Creating R and storing
+  #     full_sample_est <- pse_model$pred$pred
+  #
+  #     R <- full_sample_est - half_sample_est
+  #
+  #     if (i == 1){
+  #       R_data <- as.data.frame(R)
+  #     }
+  #     else {
+  #       R_data <- cbind(R_data,R)
+  #     }
+  #   }
+  #
+  #   #Gaining variance of R per person
+  #   CI_n_rows <- length(full_sample_est)
+  #   for (i in 1:CI_n_rows){
+  #     # sqrt_n <- sqrt(num_boot)
+  #     # temp <-  sqrt_n * R_data[i,]
+  #     # var <- apply(temp, MARGIN = 1, FUN = var)
+  #     # SE <- sqrt(var)
+  #     #
+  #     # LCI <- pse_model$po_pred[i,] - (1/sqrt_n)*SE*1.96
+  #     # UCI <- pse_model$po_pred[i,] + (1/sqrt_n)*SE*1.96
+  #
+  #     temp <-  R_data[i,]
+  #     var <- apply(temp, MARGIN = 1, FUN = var)
+  #     SE <- sqrt(var)
+  #
+  #     LCI <- full_sample_est[i] - SE*1.96
+  #     UCI <- full_sample_est[i] + SE*1.96
+  #
+  #     if (i == 1){
+  #       LCI_data <- LCI
+  #       UCI_data <- UCI
+  #     }
+  #     else {
+  #       LCI_data <- append(LCI_data,LCI)
+  #       UCI_data <- append(UCI_data,UCI)
+  #     }
+  #   }
+  # }
+  # else if (CI == TRUE & pse_approach == "Pooled" & pse_method != "Random forest"){
+  #   return("Inappropriate pseudo-outcome regression method for obtaining CI's")
+  # }
 
 
   #--------------#
   #--- Output ---#
   #--------------#
-  if (pse_approach == "Pooled" &  CI == TRUE){
+  if ((pse_approach == "Pooled - Factor" | pse_approach == "Pooled - Continuous") &  CI == TRUE){
     output <- list(TMLE_output=list(TMLE_output_all),
                    data_with_preds=pred_dataset_all,
-                   predictions=pse_model$pred,
+                   predictions=pse_pred,
                    CATE_LCI = LCI_data,
                    CATE_UCI = UCI_data,
                    check <- pse_model)
   }
-  else if (pse_approach == "Pooled" &  CI == FALSE){
+  else if ((pse_approach == "Pooled - Factor" | pse_approach == "Pooled - Continuous") &  CI == FALSE){
     output <- list(TMLE_output=list(TMLE_output_all),
                    data_with_preds=pred_dataset_all,
-                   predictions=pse_model$pred)
+                   predictions=pse_pred,
+                   pse_model=pse_model)
   }
   else {
     output <- list(TMLE_output=list(TMLE_output_all),
@@ -1243,86 +1379,85 @@ survEP_learner <- function(data,
 
 
 
-# 
-# #---------------#
-# #--- Example ---#
-# #---------------#
-# load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
-# 
-# #Defining censoring indicator
-# ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
-# ACTG175_data <- ACTG175_data[1:2139,]
-# ACTG175_data$trunc <- round(runif(2139,0,250))
-# ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
-# ACTG175_data <- ACTG175_data[1:2000,]
-# 
-# event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
-#   c(alg,"All")
+
+#---------------#
+#--- Example ---#
+#---------------#
+load("C:/Users/MatthewPryce/OneDrive - London School of Hygiene and Tropical Medicine/Documents/PhD/DR_Missing_Paper/Data_example/ACTG175/Data/ACTG175_data.RData")
+
+#Defining censoring indicator
+ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+ACTG175_data <- ACTG175_data[1:2139,]
+ACTG175_data$trunc <- round(runif(2139,0,250))
+ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
+ACTG175_data <- ACTG175_data[1:2000,]
+
+event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
+  c(alg,"All")
+})
+event.SL.library2 <- c("SL.mean",
+                       "SL.glm")#,"SL.glmnet_8")
+
+
+# event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
+#                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
+#                                                   c(alg, "survscreen.glmnet", "survscreen.marg", "All")
 # })
-# event.SL.library2 <- c("SL.mean",
-#                        "SL.glm")
-# 
-# 
-# # event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
-# #                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
-# #                                                   c(alg, "survscreen.glmnet", "survscreen.marg", "All")
-# # })
-# # 
-# # 
-# e_lib <- c("SL.mean",
-#            "SL.glm")#,
-# #            # "SL.glmnet_8", "SL.glmnet_9",
-# #            # "SL.glmnet_11", "SL.glmnet_12",
-# #            # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
-# #            # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
-# #            # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
-# #            # "SL.svm_1",
-# #            # "SL.kernelKnn_4","SL.kernelKnn_10")
-# # 
-# 
-# 
-# 
-# 
-# start_time <- proc.time()
-# 
-# survEP_check <- survEP_learner(data = ACTG175_data,
-#                                id = "pidnum",
-#                                time = "days",
-#                                outcome = "cens",
-#                                censor = "censor_ind",
-#                                exposure = "treat",
-#                                truncation = "trunc",
-#                                time_cuts = seq(from=100,to=1000,by=100),
-#                                splits = 1,
-#                                e_covariates = c("age","wtkg","hemo","homo","drugs"),
-#                                e_method = "Parametric",
-#                                e_SL_lib = e_lib,
-#                                out_covariates = c("age","wtkg","hemo","homo","drugs"),
-#                                out_method = "Local survival stack",
-#                                out_SL_lib = event.SL.library2,
-#                                g_covariates = c("age","wtkg","hemo","homo","drugs"),
-#                                g_method = "Local survival stack",
-#                                g_SL_lib = event.SL.library2,
-#                                h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-#                                h_method = "Local survival stack",
-#                                h_SL_lib = event.SL.library2,
-#                                iso_reg = FALSE,
-#                                pse_covariates = c("age","wtkg","hemo","homo","drugs"),
-#                                pse_approach = "Pooled",
-#                                pse_method = "Super learner",
-#                                pse_SL_lib = c("SL.mean",
-#                                               "SL.lm"),
-#                                               # "SL.glmnet_8", "SL.glmnet_9",
-#                                               # "SL.glmnet_11", "SL.glmnet_12",
-#                                               # "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
-#                                newdata = ACTG175_data,
-#                                target_option = "Lasso - Linear - Option 3",
-#                                CI = FALSE,
-#                                num_boot = 10)#,
-#                                # sieve_dim = 15,
-#                                # sieve_interaction = 2)
-# end_time <- proc.time()
-# end_time - start_time
+#
+#
+e_lib <- c("SL.mean",
+           "SL.glm")#,"SL.glmnet_8")#,
+#            # , "SL.glmnet_9",
+#            # "SL.glmnet_11", "SL.glmnet_12",
+#            # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
+#            # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
+#            # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
+#            # "SL.svm_1",
+#            # "SL.kernelKnn_4","SL.kernelKnn_10")
+#
+
+
+start_time <- proc.time()
+
+survEP_check <- survEP_learner(data = ACTG175_data,
+                               estimand = "Difference",
+                               id = "pidnum",
+                               time = "days",
+                               outcome = "cens",
+                               censor = "censor_ind",
+                               exposure = "treat",
+                               truncation = "trunc",
+                               time_cuts = seq(from=100,to=1000,by=100),
+                               splits = 1,
+                               e_covariates = c("age","wtkg","hemo","homo","drugs"),
+                               e_method = "Super learner",
+                               e_SL_lib = e_lib,
+                               out_covariates = c("age","wtkg","hemo","homo","drugs"),
+                               out_method = "Local survival stack",
+                               out_SL_lib = event.SL.library2,
+                               g_covariates = c("age","wtkg","hemo","homo","drugs"),
+                               g_method = "Local survival stack",
+                               g_SL_lib = event.SL.library2,
+                               h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+                               h_method = "Local survival stack",
+                               h_SL_lib = event.SL.library2,
+                               iso_reg = FALSE,
+                               pse_covariates = c("age","wtkg","hemo","homo","drugs"),
+                               pse_approach = "Pooled - Continuous",
+                               pse_method = "GAM",
+                               pse_SL_lib = c("SL.mean",
+                                              "SL.lm"),
+                                              # "SL.glmnet_8", "SL.glmnet_9",
+                                              # "SL.glmnet_11", "SL.glmnet_12",
+                                              # "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
+                               newdata = ACTG175_data,
+                               target_option = "Lasso - Linear - Option 3",
+                               CI = FALSE,
+                               num_boot = 10)#,
+                               # sieve_dim = 15,
+                               # sieve_interaction = 2)
+end_time <- proc.time()
+end_time - start_time
 
 
 #--- Notes ---#
