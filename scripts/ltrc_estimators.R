@@ -519,140 +519,140 @@ trunclearner <- function(dat, nu, cov.names.CATE, cov.names.CATE.binary = NULL, 
   return(result_list)
 }
 
-
-load("~/PhD/iTMLE-surv/Simulations/LTRC_simulations/Output/Model_results/Full_sims/Setting_1/setting_1_all_output.RData")
-test_data <- data_list[[1]]$sim_data_train
-test_data_all <- subset(test_data,test_data$Observed == 1)
-
-#test_data <- sim_data_test
-#test_data_all <- subset(test_data,test_data$Observed == 1)
-
-
-t00_all = c(0.1,seq(from=0.25,to=2,by=0.25))
-
-t00 = t00_all[9]
-
-nu <- function(t,t0=t00){
-  # indicator function
-  result = as.numeric(t>t0)
-
-  # result = pmin(t, t0)
-
-  # result = log(t)
-
-  return(result)
-}
-
-
-bound_away_zero <- function(x, trim){
-  sign_x = sign(x)
-  sign_x[x == 0] <- 1
-  y = sign_x * pmax(abs(x), trim)
-
-  return(y)
-}
-
-
-trim = 0.05
-trim.est = 0
-
-options.F = list(trim = trim.est,
-                 ntree = 500, mtry = 2,
-                 df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5)
-options.Sd = list(trim = trim.est,
-                  ntree = 500, mtry = 2,
-                  df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5,
-                  nfolds.OOF = 5)
-options.G = list(trim = trim.est,
-                 df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5,
-                 trunc.weighting = TRUE)
-options.PS = list(trim = trim.est,
-                  df = 7,
-                  ntree = 500)
-
-num_search_rounds = 1
-ntrees_max = 100
-
-event.SL.library2 <- c("SL.mean","SL.glm",
-                       "SL.glmnet_1","SL.glmnet_2","SL.glmnet_3", "SL.glmnet_4",
-                       # "SL.glmnet_5","SL.glmnet_6","SL.glmnet_7", "SL.glmnet_8",
-                       # "SL.glmnet_8","SL.glmnet_9","SL.glmnet_11", "SL.glmnet_12",
-                       "SL.ranger_1","SL.ranger_2")#,"SL.ranger_3","SL.ranger_4",
-                       # "SL.ranger_5","SL.ranger_6","SL.ranger_7","SL.ranger_8",
-                       # "SL.ranger_9","SL.ranger_10","SL.ranger_11","SL.ranger_12")
-
-pse_lib <- c("SL.mean","SL.lm")#,
-             # "SL.glmnet_1","SL.glmnet_2")#,"SL.glmnet_3", "SL.glmnet_4",
-             # "SL.glmnet_5","SL.glmnet_6","SL.glmnet_7", "SL.glmnet_8",
-             # "SL.glmnet_8","SL.glmnet_9","SL.glmnet_11", "SL.glmnet_12",
-             # "SL.ranger_1","SL.ranger_2","SL.ranger_3","SL.ranger_4",
-             # "SL.ranger_5","SL.ranger_6","SL.ranger_7","SL.ranger_8",
-             # "SL.ranger_9","SL.ranger_10","SL.ranger_11","SL.ranger_12")
-
-
-
-nlambda_seq = c(50,100,250)
-alpha_seq <- c(0.5,1)
-usemin_seq <- c(FALSE,TRUE)
-para_learners = create.Learner("SL.glmnet", tune = list(nlambda = nlambda_seq,alpha = alpha_seq,useMin = usemin_seq))
-
-#Random forest
-mtry_seq <-  c(3,5)
-min_node_seq <- c(10,20)
-num_trees_seq <- c(500)
-sample_fraction_seq <- c(0.2,0.4,0.6)
-rf_learners = create.Learner("SL.ranger", tune = list(mtry = mtry_seq,
-                                                      min.node.size = min_node_seq,
-                                                      num.trees=num_trees_seq,
-                                                      sample.fraction=sample_fraction_seq))
-
-
-#time_seq <- c(0.1,seq(from=0.25,to=2,by=0.25)) 
-#for (i in 2:length(time_seq)){
-#  time_seq_use <- time_seq[1:i]
-#}
-
-check <- trunclearner(test_data_all,
-                      nu = nu,
-                      X.name = "T_tilde",    #Observed time
-                      Q.name = "Q",          #Truncation time
-                      event.name = "delta",  #Event indicator
-                      A.name = "A",          #Treatment
-                      K = 10,                 #Number of folds for cross-fitting of nuisance params
-                      model.T = "Local survival stack",#"pCox",#
-                      model.D = "Local survival stack",#"pCox",#
-                      model.Q = "Local survival stack",#"pCox", #
-                      model.A = "Super learner", #"gbm",  #
-                      cov.names.T = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
-                                      "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
-                      cov.names.binary.T = NULL,
-                      cov.names.D = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
-                                      "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
-                      cov.names.binary.D = NULL,
-                      cov.names.Q = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
-                                      "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
-                      cov.names.binary.Q = NULL,
-                      cov.names.A = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
-                                      "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
-                      cov.names.binary.A = NULL,
-                      cov.names.CATE = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
-                                         "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
-                      cov.names.CATE.binary = NULL,
-                      est_approach_G = "truncIPW.F",
-                      est_approach_PS = "truncIPW.F",
-                      options.F = options.F,
-                      options.Sd = options.Sd,
-                      options.G = options.G,
-                      options.PS = options.PS,
-                      num_search_rounds=num_search_rounds, ntrees_max=ntrees_max,
-                      e_SL_lib = event.SL.library2,
-                      out_SL_lib = event.SL.library2,
-                      h_SL_lib = event.SL.library2,
-                      pse_SL_lib = pse_lib,
-                      pse_option = "boost",
-                      newdata = test_data,
-                      trim = 0.05,
-                      time_grid = c(0.1,seq(from=0.25,to=2,by=0.25)))
+# 
+# load("setting_1_all_output.RData")  #Update
+# test_data <- data_list[[1]]$sim_data_train
+# test_data_all <- subset(test_data,test_data$Observed == 1)
+# 
+# #test_data <- sim_data_test
+# #test_data_all <- subset(test_data,test_data$Observed == 1)
+# 
+# 
+# t00_all = c(0.1,seq(from=0.25,to=2,by=0.25))
+# 
+# t00 = t00_all[9]
+# 
+# nu <- function(t,t0=t00){
+#   # indicator function
+#   result = as.numeric(t>t0)
+# 
+#   # result = pmin(t, t0)
+# 
+#   # result = log(t)
+# 
+#   return(result)
+# }
+# 
+# 
+# bound_away_zero <- function(x, trim){
+#   sign_x = sign(x)
+#   sign_x[x == 0] <- 1
+#   y = sign_x * pmax(abs(x), trim)
+# 
+#   return(y)
+# }
+# 
+# 
+# trim = 0.05
+# trim.est = 0
+# 
+# options.F = list(trim = trim.est,
+#                  ntree = 500, mtry = 2,
+#                  df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5)
+# options.Sd = list(trim = trim.est,
+#                   ntree = 500, mtry = 2,
+#                   df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5,
+#                   nfolds.OOF = 5)
+# options.G = list(trim = trim.est,
+#                  df = 7, nfolds = 10, s = "lambda.1se", alpha = 0.5,
+#                  trunc.weighting = TRUE)
+# options.PS = list(trim = trim.est,
+#                   df = 7,
+#                   ntree = 500)
+# 
+# num_search_rounds = 1
+# ntrees_max = 100
+# 
+# event.SL.library2 <- c("SL.mean","SL.glm",
+#                        "SL.glmnet_1","SL.glmnet_2","SL.glmnet_3", "SL.glmnet_4",
+#                        # "SL.glmnet_5","SL.glmnet_6","SL.glmnet_7", "SL.glmnet_8",
+#                        # "SL.glmnet_8","SL.glmnet_9","SL.glmnet_11", "SL.glmnet_12",
+#                        "SL.ranger_1","SL.ranger_2")#,"SL.ranger_3","SL.ranger_4",
+#                        # "SL.ranger_5","SL.ranger_6","SL.ranger_7","SL.ranger_8",
+#                        # "SL.ranger_9","SL.ranger_10","SL.ranger_11","SL.ranger_12")
+# 
+# pse_lib <- c("SL.mean","SL.lm")#,
+#              # "SL.glmnet_1","SL.glmnet_2")#,"SL.glmnet_3", "SL.glmnet_4",
+#              # "SL.glmnet_5","SL.glmnet_6","SL.glmnet_7", "SL.glmnet_8",
+#              # "SL.glmnet_8","SL.glmnet_9","SL.glmnet_11", "SL.glmnet_12",
+#              # "SL.ranger_1","SL.ranger_2","SL.ranger_3","SL.ranger_4",
+#              # "SL.ranger_5","SL.ranger_6","SL.ranger_7","SL.ranger_8",
+#              # "SL.ranger_9","SL.ranger_10","SL.ranger_11","SL.ranger_12")
+# 
+# 
+# 
+# nlambda_seq = c(50,100,250)
+# alpha_seq <- c(0.5,1)
+# usemin_seq <- c(FALSE,TRUE)
+# para_learners = create.Learner("SL.glmnet", tune = list(nlambda = nlambda_seq,alpha = alpha_seq,useMin = usemin_seq))
+# 
+# #Random forest
+# mtry_seq <-  c(3,5)
+# min_node_seq <- c(10,20)
+# num_trees_seq <- c(500)
+# sample_fraction_seq <- c(0.2,0.4,0.6)
+# rf_learners = create.Learner("SL.ranger", tune = list(mtry = mtry_seq,
+#                                                       min.node.size = min_node_seq,
+#                                                       num.trees=num_trees_seq,
+#                                                       sample.fraction=sample_fraction_seq))
+# 
+# 
+# #time_seq <- c(0.1,seq(from=0.25,to=2,by=0.25)) 
+# #for (i in 2:length(time_seq)){
+# #  time_seq_use <- time_seq[1:i]
+# #}
+# 
+# check <- trunclearner(test_data_all,
+#                       nu = nu,
+#                       X.name = "T_tilde",    #Observed time
+#                       Q.name = "Q",          #Truncation time
+#                       event.name = "delta",  #Event indicator
+#                       A.name = "A",          #Treatment
+#                       K = 10,                 #Number of folds for cross-fitting of nuisance params
+#                       model.T = "Local survival stack",#"pCox",#
+#                       model.D = "Local survival stack",#"pCox",#
+#                       model.Q = "Local survival stack",#"pCox", #
+#                       model.A = "Super learner", #"gbm",  #
+#                       cov.names.T = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
+#                                       "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
+#                       cov.names.binary.T = NULL,
+#                       cov.names.D = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
+#                                       "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
+#                       cov.names.binary.D = NULL,
+#                       cov.names.Q = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
+#                                       "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
+#                       cov.names.binary.Q = NULL,
+#                       cov.names.A = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
+#                                       "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
+#                       cov.names.binary.A = NULL,
+#                       cov.names.CATE = c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10",
+#                                          "X11","X12","X13","X14","X15","X16","X17","X18","X19","X20"),
+#                       cov.names.CATE.binary = NULL,
+#                       est_approach_G = "truncIPW.F",
+#                       est_approach_PS = "truncIPW.F",
+#                       options.F = options.F,
+#                       options.Sd = options.Sd,
+#                       options.G = options.G,
+#                       options.PS = options.PS,
+#                       num_search_rounds=num_search_rounds, ntrees_max=ntrees_max,
+#                       e_SL_lib = event.SL.library2,
+#                       out_SL_lib = event.SL.library2,
+#                       h_SL_lib = event.SL.library2,
+#                       pse_SL_lib = pse_lib,
+#                       pse_option = "boost",
+#                       newdata = test_data,
+#                       trim = 0.05,
+#                       time_grid = c(0.1,seq(from=0.25,to=2,by=0.25)))
 
 
 

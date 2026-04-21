@@ -1380,82 +1380,82 @@ surviTMLE_learner <- function(data,
 #---------------#
 #--- Example ---#
 #---------------#
-load("C:/Users/MatthewPryce/OneDrive - London School of Hygiene and Tropical Medicine/Documents/PhD/DR_Missing_Paper/Data_example/ACTG175/Data/ACTG175_data.RData")
-
-#Defining censoring indicator
-ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
-ACTG175_data <- ACTG175_data[1:2139,]
-ACTG175_data$trunc <- round(runif(2139,0,250))
-ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
-ACTG175_data <- ACTG175_data[1:2000,]
-
-event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
-  c(alg,"All")
-})
-event.SL.library2 <- c("SL.mean",
-                       "SL.glm")#,"SL.glmnet_8")
-
-
-# event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
-#                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
-#                                                   c(alg, "survscreen.glmnet", "survscreen.marg", "All")
+# load("C:ACTG175_data.RData") #Update to needed location
+# 
+# #Defining censoring indicator
+# ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+# ACTG175_data <- ACTG175_data[1:2139,]
+# ACTG175_data$trunc <- round(runif(2139,0,250))
+# ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
+# ACTG175_data <- ACTG175_data[1:2000,]
+# 
+# event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
+#   c(alg,"All")
 # })
-#
-#
-e_lib <- c("SL.mean",
-           "SL.glm")#,"SL.glmnet_8")#,
-#            # , "SL.glmnet_9",
-#            # "SL.glmnet_11", "SL.glmnet_12",
-#            # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
-#            # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
-#            # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
-#            # "SL.svm_1",
-#            # "SL.kernelKnn_4","SL.kernelKnn_10")
-#
-
-
-start_time <- proc.time()
-
-surviTMLE_check <- surviTMLE_learner(data = ACTG175_data,
-                                     estimand = "Difference",
-                                     id = "pidnum",
-                                     time = "days",
-                                     outcome = "cens",
-                                     censor = "censor_ind",
-                                     exposure = "treat",
-                                     truncation = "trunc",
-                                     time_cuts = seq(from=100,to=1000,by=100),
-                                     splits = 1,
-                                     e_covariates = c("age","wtkg","hemo","homo","drugs"),
-                                     e_method = "Super learner",
-                                     e_SL_lib = e_lib,
-                                     out_covariates = c("age","wtkg","hemo","homo","drugs"),
-                                     out_method = "Local survival stack",
-                                     out_SL_lib = event.SL.library2,
-                                     g_covariates = c("age","wtkg","hemo","homo","drugs"),
-                                     g_method = "Local survival stack",
-                                     g_SL_lib = event.SL.library2,
-                                     h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                                     h_method = "Local survival stack",
-                                     h_SL_lib = event.SL.library2,
-                                     iso_reg = FALSE,
-                                     pse_covariates = c("age","wtkg","hemo","homo","drugs"),
-                                     pse_approach = "Pooled - Continuous",
-                                     pse_method = "GAM",
-                                     pse_SL_lib = c("SL.mean",
-                                                    "SL.lm"),
-                                     # "SL.glmnet_8", "SL.glmnet_9",
-                                     # "SL.glmnet_11", "SL.glmnet_12",
-                                     # "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
-                                     newdata = ACTG175_data,
-                                     target_option = "Lasso - Linear - Option 3",
-                                     CI = FALSE,
-                                     num_boot = 10)#,
-# sieve_dim = 15,
-# sieve_interaction = 2)
-end_time <- proc.time()
-end_time - start_time
-
+# event.SL.library2 <- c("SL.mean",
+#                        "SL.glm")#,"SL.glmnet_8")
+# 
+# 
+# # event.SL.library <- cens.SL.library <- lapply(c("survSL.km", "survSL.coxph", "survSL.rfsrc","survSL.gam",
+# #                                                 "survSL.expreg","survSL.weibreg","survSL.loglogreg","survSL.pchreg"), function(alg) {
+# #                                                   c(alg, "survscreen.glmnet", "survscreen.marg", "All")
+# # })
+# #
+# #
+# e_lib <- c("SL.mean",
+#            "SL.glm")#,"SL.glmnet_8")#,
+# #            # , "SL.glmnet_9",
+# #            # "SL.glmnet_11", "SL.glmnet_12",
+# #            # "SL.ranger_1","SL.ranger_2","SL.ranger_3",
+# #            # "SL.ranger_4","SL.ranger_5","SL.ranger_6",
+# #            # "SL.nnet_1","SL.nnet_2","SL.nnet_3",
+# #            # "SL.svm_1",
+# #            # "SL.kernelKnn_4","SL.kernelKnn_10")
+# #
+# 
+# 
+# start_time <- proc.time()
+# 
+# surviTMLE_check <- surviTMLE_learner(data = ACTG175_data,
+#                                      estimand = "Difference",
+#                                      id = "pidnum",
+#                                      time = "days",
+#                                      outcome = "cens",
+#                                      censor = "censor_ind",
+#                                      exposure = "treat",
+#                                      truncation = "trunc",
+#                                      time_cuts = seq(from=100,to=1000,by=100),
+#                                      splits = 1,
+#                                      e_covariates = c("age","wtkg","hemo","homo","drugs"),
+#                                      e_method = "Super learner",
+#                                      e_SL_lib = e_lib,
+#                                      out_covariates = c("age","wtkg","hemo","homo","drugs"),
+#                                      out_method = "Local survival stack",
+#                                      out_SL_lib = event.SL.library2,
+#                                      g_covariates = c("age","wtkg","hemo","homo","drugs"),
+#                                      g_method = "Local survival stack",
+#                                      g_SL_lib = event.SL.library2,
+#                                      h_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                                      h_method = "Local survival stack",
+#                                      h_SL_lib = event.SL.library2,
+#                                      iso_reg = FALSE,
+#                                      pse_covariates = c("age","wtkg","hemo","homo","drugs"),
+#                                      pse_approach = "Pooled - Continuous",
+#                                      pse_method = "GAM",
+#                                      pse_SL_lib = c("SL.mean",
+#                                                     "SL.lm"),
+#                                      # "SL.glmnet_8", "SL.glmnet_9",
+#                                      # "SL.glmnet_11", "SL.glmnet_12",
+#                                      # "SL.ranger_1","SL.ranger_2","SL.ranger_3"),
+#                                      newdata = ACTG175_data,
+#                                      target_option = "Lasso - Linear - Option 3",
+#                                      CI = FALSE,
+#                                      num_boot = 10)#,
+# # sieve_dim = 15,
+# # sieve_interaction = 2)
+# end_time <- proc.time()
+# end_time - start_time
+# 
 
 #--- Notes ---#
 #Time to event = "days"

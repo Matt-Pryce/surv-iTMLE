@@ -163,49 +163,49 @@ T_learner <- function(data,
 
 ##############################################################
 
-
-#---------------#
-#--- Example ---#
-#---------------#
-load("C:/Users/MatthewPryce/OneDrive - London School of Hygiene and Tropical Medicine/Documents/PhD/DR_Missing_Paper/Data_example/ACTG175/Data/ACTG175_data.RData")
-
-ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
-ACTG175_data <- ACTG175_data[1:800,]
-ACTG175_data$trunc <- round(runif(800,0,250))
-ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
-
-
-LT <- 1
-
-if (LT==1){
-  event.SL.library <- c("SL.mean",
-                        "SL.glm")
-}
-if (LT == 0){
-  event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
-    c(alg,"All")
-  })
-}
-
-start_time <- proc.time()
-
-T_check <- T_learner(data = ACTG175_data,
-                     estimand = "Difference",
-                     id = "pidnum",
-                     time = "days", 
-                     outcome = "cens",
-                     censor = "censor_ind",
-                     exposure = "treat",
-                     truncation = "trunc",
-                     time_cuts = seq(from=200,to=400,by=100),
-                     out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                     out_method = "pcox",
-                     out_SL_lib = event.SL.library,
-                     newdata = ACTG175_data)
-
-end_time <- proc.time()
-end_time - start_time
-
+# 
+# #---------------#
+# #--- Example ---#
+# #---------------#
+# load("C:ACTG175_data.RData")
+# 
+# ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+# ACTG175_data <- ACTG175_data[1:800,]
+# ACTG175_data$trunc <- round(runif(800,0,250))
+# ACTG175_data <- subset(ACTG175_data,ACTG175_data$days > ACTG175_data$trunc)
+# 
+# 
+# LT <- 1
+# 
+# if (LT==1){
+#   event.SL.library <- c("SL.mean",
+#                         "SL.glm")
+# }
+# if (LT == 0){
+#   event.SL.library <- cens.SL.library <- lapply(c("survSL.km","survSL.expreg"), function(alg) {
+#     c(alg,"All")
+#   })
+# }
+# 
+# start_time <- proc.time()
+# 
+# T_check <- T_learner(data = ACTG175_data,
+#                      estimand = "Difference",
+#                      id = "pidnum",
+#                      time = "days", 
+#                      outcome = "cens",
+#                      censor = "censor_ind",
+#                      exposure = "treat",
+#                      truncation = "trunc",
+#                      time_cuts = seq(from=200,to=400,by=100),
+#                      out_covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                      out_method = "pcox",
+#                      out_SL_lib = event.SL.library,
+#                      newdata = ACTG175_data)
+# 
+# end_time <- proc.time()
+# end_time - start_time
+# 
 
 
 

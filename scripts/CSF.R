@@ -269,34 +269,34 @@ CSF <- function(data,
 
 ##############################################################
 
-
-#---------------#
-#--- Example ---#
-#---------------#
-load("~/PhD/DR_Missing_Paper/Data_example/Data/ACTG175_data.RData")
-
-#Defining censoring indicator
-ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
-
-
-start_time <- proc.time()
-
-CSF_check <- CSF(data = ACTG175_data,
-                 id = "pidnum",
-                 time = "days", 
-                 outcome = "cens",
-                 censor = "censor_ind",
-                 exposure = "treat",
-                 time_cuts = seq(from=200,to=1100,by=100),
-                 splits = 10,
-                 prop_est = TRUE,
-                 covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
-                 e_method = "Parametric",
-                 newdata = ACTG175_data)
-
-
-end_time <- proc.time()
-end_time - start_time
+# 
+# #---------------#
+# #--- Example ---#
+# #---------------#
+# load("ACTG175_data.RData")  #Update
+# 
+# #Defining censoring indicator
+# ACTG175_data$censor_ind <- 1 - ACTG175_data$cens
+# 
+# 
+# start_time <- proc.time()
+# 
+# CSF_check <- CSF(data = ACTG175_data,
+#                  id = "pidnum",
+#                  time = "days", 
+#                  outcome = "cens",
+#                  censor = "censor_ind",
+#                  exposure = "treat",
+#                  time_cuts = seq(from=200,to=1100,by=100),
+#                  splits = 10,
+#                  prop_est = TRUE,
+#                  covariates = c("age","wtkg","hemo","homo","drugs","karnof"),
+#                  e_method = "Parametric",
+#                  newdata = ACTG175_data)
+# 
+# 
+# end_time <- proc.time()
+# end_time - start_time
 
 
 #Add max horizon in 
