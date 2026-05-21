@@ -1,4 +1,3 @@
-
 #######################################################################################
 # Script: surv-iTMLE function
 # Date: 25/03/24
@@ -1426,7 +1425,6 @@ surviTMLE_learner <- function(data,
 
 
 
-
 #---------------#
 #--- Example ---#
 #---------------#
@@ -1477,7 +1475,7 @@ surviTMLE_check <- surviTMLE_learner(data = ACTG175_data,
                                      outcome = "cens",
                                      censor = "censor_ind",
                                      exposure = "treat",
-                                    #  truncation = "trunc",
+                                     #truncation = "trunc",
                                      time_cuts = seq(from=100,to=1000,by=100),
                                      splits = 1,
                                      e_covariates = c("age","wtkg","hemo","homo","drugs"),
@@ -1526,7 +1524,3 @@ end_time - start_time
 
 #Censoring SL cannot currently do full time points as the process requires saving a matrix that is too big 
 #Need to update process 
-
-
-
-

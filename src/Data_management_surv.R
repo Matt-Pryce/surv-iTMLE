@@ -20,23 +20,37 @@
 #library(SuperLearner)
 #library(mice)
 
-#' @param data The data frame containing all required information
-#' @param leanrer Which learner is data management being run on 
-#' @param analysis Type of analysis to be run (If not mDR, complete case or outcome imputation) 
-#' @param id Identification for individuals
-#' @param outcome The name of the outcome of interest
-#' @param exposure The name of the exposure of interest
-#' @param time_cuts A vector of timepoints to cut at
-#' @param splits The number of splits used in nuisance training 
-#' @param outcome_observed_indicator Indicator identifying when the outcome variable is observed (1=observed, 0=missing)
-#' @param out_covariates  List containing the names of the variables to be input into each outcome model
-#' @param e_covariates  List containing the names of the variables to be input into the propensity score model
-#' @param g_covariates List containing the names of the variables to be input into the missingness model, excluding exposure
-#' @param imp_covariates Covariates to be used in SL imputation model if SL imputation used
-#' @param pse_covariates List containing the names of the variables to be input into the pseudo outcome model
-#' @param newdata New data to create predictions for
-
-#' @return Cleaned data for training and testing, along with indicators for whether the outcome is binary or continuous 
+#' @description Prepares survival data for use in the surv-iTMLE framework. Selects and renames
+#'   variables to a standardised internal naming scheme, assigns cross-fitting splits, converts
+#'   wide-format data to the long interval format required by the nuisance models, and applies
+#'   logic checks on the input variables.
+#'
+#' @param data A data frame containing all variables required for the analysis.
+#' @param learner The learner calling this function. One of \code{"surviTMLE-learner"},
+#'   \code{"M-learner"}, \code{"T-learner"}, \code{"CSF"}.
+#' @param analysis_type Type of analysis to be run. Default \code{"N/A"}.
+#' @param id Name of the column containing individual identifiers.
+#' @param time Name of the column containing the observed event or censoring time.
+#' @param outcome Name of the binary event indicator (1 = event, 0 = censored).
+#' @param censor Name of the binary censoring indicator (1 = censored, 0 = event).
+#' @param exposure Name of the binary baseline exposure variable.
+#' @param truncation Name of the column containing left-truncation times, or \code{NULL} if
+#'   there is no left truncation.
+#' @param time_cuts A numeric vector of time points at which the long-format intervals are cut,
+#'   or \code{"N/A"} to use all unique observed event times.
+#' @param splits Number of cross-fitting splits. Valid values: \code{1} or \code{10}.
+#' @param out_covariates Character vector of covariate names for the outcome model.
+#' @param e_covariates Character vector of covariate names for the propensity score model.
+#' @param g_covariates Character vector of covariate names for the censoring model, excluding
+#'   the exposure variable.
+#' @param h_covariates Character vector of covariate names for the left-truncation weight model,
+#'   or \code{NULL} if not required.
+#' @param pse_covariates Character vector of covariate names for the pseudo-outcome regression model.
+#' @param newdata A data frame on which final predictions are made. Typically the same as
+#'   \code{data}.
+#'
+#' @return A list containing the processed training dataset, long-format data, unique event times,
+#'   formatted prediction data, and a left-truncation indicator.
 
 
 data_manage_surv <- function(data,
@@ -58,10 +72,38 @@ data_manage_surv <- function(data,
                              newdata
 ){
 
+  #------------------------------------#
+  #--- Sanitize variable names ---#
+  #------------------------------------#
+  tryCatch({
+    # Replace spaces and invalid characters with . in all column names
+    names(data)    <- make.names(names(data))
+    names(newdata) <- make.names(names(newdata))
+
+    # Update parameter strings to match sanitized column names
+    id       <- make.names(id)
+    time     <- make.names(time)
+    outcome  <- make.names(outcome)
+    censor   <- make.names(censor)
+    exposure <- make.names(exposure)
+    if (!is.null(truncation)) truncation <- make.names(truncation)
+
+    # Update covariate vectors
+    out_covariates <- make.names(out_covariates)
+    e_covariates   <- make.names(e_covariates)
+    g_covariates   <- make.names(g_covariates)
+    pse_covariates <- make.names(pse_covariates)
+    if (!is.null(h_covariates)) h_covariates <- make.names(h_covariates)
+  },
+  error = function(e) {
+    stop('An error occurred when sanitizing variable names')
+    print(e)
+  })
+
   #---------------------------------------------#
   #--- Checking and keeping appropriate data ---#
   #---------------------------------------------#
-  tryCatch( 
+  tryCatch(
     {
       #Checking if data is left truncated
       if(is.null(truncation) == 0){
@@ -98,7 +140,7 @@ data_manage_surv <- function(data,
       data <- subset(data,select = vars)
     },
     error=function(e) {
-      stop('An error occured when selecting the appropriate variables')
+      stop('An error occurred when selecting the appropriate variables')
       print(e)
     }
   )
@@ -118,10 +160,51 @@ data_manage_surv <- function(data,
       }
     },
     error=function(e) {
-      stop('An error occured when renaming variables')
+      stop('An error occurred when renaming variables')
       print(e)
     }
   )
+
+  #------------------------------------------------------------#
+  #--- Check pse_covariates are numeric; create indicators ---#
+  #------------------------------------------------------------#
+  tryCatch({
+    non_numeric_pse <- pse_covariates[
+      !sapply(data[pse_covariates], is.numeric)
+    ]
+
+    if (length(non_numeric_pse) > 0) {
+      message(
+        "The following pse_covariates are non-numeric and will be expanded ",
+        "to binary indicators: ",
+        paste(non_numeric_pse, collapse = ", ")
+      )
+
+      # Keep numeric pse_covariates unchanged
+      new_pse_covariates <- pse_covariates[
+        sapply(data[pse_covariates], is.numeric)
+      ]
+
+      for (var in non_numeric_pse) {
+        # Union of levels across data and newdata to keep indicators consistent
+        lvls <- sort(unique(c(as.character(data[[var]]),
+                              as.character(newdata[[var]]))))
+        # Drop reference level (first alphabetically)
+        for (lvl in lvls[-1]) {
+          col_name <- paste0(var, ".", make.names(lvl))
+          data[[col_name]]    <- as.numeric(data[[var]]    == lvl)
+          newdata[[col_name]] <- as.numeric(newdata[[var]] == lvl)
+          new_pse_covariates  <- c(new_pse_covariates, col_name)
+        }
+      }
+
+      pse_covariates <- new_pse_covariates
+    }
+  },
+  error = function(e) {
+    stop('An error occurred when checking/converting non-numeric pse_covariates')
+    print(e)
+  })
 
   tryCatch(
     {
@@ -135,7 +218,7 @@ data_manage_surv <- function(data,
     },
     #if an error occurs, tell me the error
     error=function(e) {
-      stop('An error occured when splitting the data')
+      stop('An error occurred when splitting the data')
       print(e)
     }
   )
@@ -306,7 +389,7 @@ data_manage_surv <- function(data,
       }
     },
     error=function(e) {
-      stop('An error occured when formatting the new data')
+      stop('An error occurred when formatting the new data')
       print(e)
     }
   )
@@ -354,7 +437,12 @@ data_manage_surv <- function(data,
                      evt_times_uni0=evt_times_uni0,
                      newdata=newdata,
                      newdata_long_all=newdata_long_all,
-                     LT_data=LT_data)
+                     LT_data=LT_data,
+                     e_covariates=e_covariates,
+                     out_covariates=out_covariates,
+                     g_covariates=g_covariates,
+                     h_covariates=h_covariates,
+                     pse_covariates=pse_covariates)
     }
     else {
       output <- list(data=data,
@@ -363,7 +451,12 @@ data_manage_surv <- function(data,
                      evt_times_uni0=time_cuts0,
                      newdata=newdata,
                      newdata_long_all=newdata_long_all,
-                     LT_data=LT_data)
+                     LT_data=LT_data,
+                     e_covariates=e_covariates,
+                     out_covariates=out_covariates,
+                     g_covariates=g_covariates,
+                     h_covariates=h_covariates,
+                     pse_covariates=pse_covariates)
     }
   }
   return(output)

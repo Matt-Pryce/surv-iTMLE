@@ -22,19 +22,36 @@ library(survival)
 # library(mice)
 
 
-#' @param model Nuisance model to be run
-#' @param data The data frame containing all required information
-#' @param method Statistical technique used to run the model
-#' @param covariates  List containing the names of the variables to be input into the model
-#' @param pred_data New data to create predictions for
-
-#UPDATE
-
-#' @param SL_lib Library to be used in super learner if selected
-#' @param Y_bin Indicator for when the outcome is binary
-#' @param Y_cont Indicator for when the outcome is continuous 
-
-#' @return Outcome models and their predictions for pred_data 
+#' @description Fits a single nuisance model and returns predictions for the provided prediction
+#'   dataset. Supports parametric (Cox PH / logistic), random forest, SuperLearner, and survival
+#'   stacking methods depending on the model type.
+#'
+#' @param model The nuisance model to fit. One of \code{"Outcome"}, \code{"Outcome - Diff"},
+#'   \code{"Truncation weight"}, \code{"Propensity score"}, \code{"Censoring"},
+#'   \code{"Truncation"}, \code{"Pseudo outcome - Pooled - Factor"},
+#'   \code{"Pseudo outcome - Pooled - Continuous"}, \code{"Pseudo outcome - Pooled - CI"},
+#'   \code{"Pseudo outcome - One - DR"}, \code{"Pseudo outcome - One - R"}.
+#' @param data A data frame used to train the nuisance model.
+#' @param method Statistical method for fitting the model. Valid values depend on \code{model}:
+#'   outcome/censoring models accept \code{"Parametric"}, \code{"Super learner"},
+#'   \code{"Local survival stack"}, \code{"Global survival stack"}; propensity score models
+#'   accept \code{"Parametric"}, \code{"Random forest"}, \code{"Super learner"}; truncation
+#'   models accept \code{"Parametric"}, \code{"Local survival stack"}; pseudo-outcome models
+#'   accept \code{"Parametric"}, \code{"Random forest"}, \code{"GAM"}, \code{"Super learner"}.
+#' @param covariates Character vector of covariate names to include in the model.
+#' @param pred_data A data frame (one row per individual) on which predictions are made.
+#' @param pred_data_long_all A long-format data frame (one row per individual per time interval)
+#'   used by survival stacking methods to generate time-varying predictions.
+#' @param evt_times_uni A numeric vector of unique event times defining the prediction grid.
+#' @param SL_lib SuperLearner library to use when \code{method = "Super learner"}.
+#' @param learner The learner calling this function. One of \code{"surviTMLE-learner"},
+#'   \code{"M-learner"}, \code{"T-learner"}, \code{"ltrc"}, or \code{NA} (default).
+#' @param CI_tuned_params A list of pre-tuned hyperparameters passed through for confidence
+#'   interval estimation models.
+#' @param LT Left-truncation indicator. \code{0} (default) = no left truncation;
+#'   \code{1} = left-truncated data.
+#'
+#' @return A list containing the fitted model object and its predictions for \code{pred_data}.
 
 
 nuis_mod_surv <- function(model,
@@ -157,7 +174,7 @@ nuis_mod_surv <- function(model,
       }
     },
     error=function(e) {
-      stop('An error occured when creating analysis data')
+      stop('An error occurred when creating analysis data')
       print(e)
     }
   )
@@ -247,7 +264,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running outcome models')
+        stop('An error occurred when running outcome models')
         print(e)
       }
     )
@@ -341,7 +358,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running outcome models')
+        stop('An error occurred when running outcome models')
         print(e)
       }
     )
@@ -367,7 +384,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running outcome diff model')
+        stop('An error occurred when running outcome diff model')
         print(e)
       }
     )
@@ -395,7 +412,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running outcome models')
+        stop('An error occurred when running outcome models')
         print(e)
       }
     )
@@ -450,7 +467,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running censoring model')
+        stop('An error occurred when running censoring model')
         print(e)
       }
     )
@@ -514,7 +531,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running censoring model')
+        stop('An error occurred when running censoring model')
         print(e)
       }
     )
@@ -550,7 +567,7 @@ nuis_mod_surv <- function(model,
         }
       },
       error=function(e) {
-        stop('An error occured when running censoring model')
+        stop('An error occurred when running censoring model')
         print(e)
       }
     )
@@ -978,7 +995,7 @@ nuis_mod_surv <- function(model,
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
@@ -1192,7 +1209,7 @@ nuis_mod_surv <- function(model,
      },
      #if an error occurs, tell me the error
      error=function(e) {
-       stop('An error occured when drawning predictions from outcome models')
+       stop('An error occurred when drawing predictions from outcome models')
        print(e)
      }
    )
@@ -1209,7 +1226,7 @@ nuis_mod_surv <- function(model,
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
@@ -1235,7 +1252,7 @@ nuis_mod_surv <- function(model,
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
@@ -1334,7 +1351,7 @@ nuis_mod_surv <- function(model,
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
@@ -1364,31 +1381,18 @@ nuis_mod_surv <- function(model,
           matrix_list <- split(temp[, -1], temp$ID)  # Remove ID column, split by ID
           matrix_list <- lapply(matrix_list, as.matrix)
 
-          #Transforming matrices
+          #Transforming matrices and re-collating into a long dataset with preds
           transformed_list <- lapply(matrix_list, t)
-          
-          #Re-collating into a long dataset with preds
-          n_rows <- sum(sapply(transformed_list, nrow))
-          n_cols <- ncol(transformed_list[[1]])
-          col_names <- paste0("G_k_Q", seq_len(n_cols))
-          
-          stacked_matrix <- as.data.frame(matrix(NA, nrow = n_rows, ncol = n_cols))
-          colnames(stacked_matrix) <- col_names
 
-          # Fill the pre-allocated data frame
-          row_counter <- 1
-          for (mat in transformed_list) {
-            current_rows <- nrow(mat)
-            stacked_matrix[row_counter:(row_counter + current_rows - 1), ] <- as.data.frame(mat)
-            row_counter <- row_counter + current_rows
-          }
-          
-          pred_data_long_all <- cbind(pred_data_long_all,stacked_matrix)
+          stacked_matrix <- as.data.frame(do.call(rbind, transformed_list))
+          colnames(stacked_matrix) <- paste0("G_k_Q", seq_len(ncol(stacked_matrix)))
+
+          pred_data_long_all <- cbind(pred_data_long_all, stacked_matrix)
         }
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
@@ -1430,7 +1434,7 @@ nuis_mod_surv <- function(model,
       },
       #if an error occurs, tell me the error
       error=function(e) {
-        stop('An error occured when drawning predictions from outcome models')
+        stop('An error occurred when drawing predictions from outcome models')
         print(e)
       }
     )
